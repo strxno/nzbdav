@@ -20,6 +20,11 @@ public static class ExceptionExtensions
         return exception is TaskCanceledException or OperationCanceledException;
     }
 
+    public static bool IsTimeoutException(this Exception exception)
+    {
+        return exception.TryGetCausingException<TimeoutException>(out _);
+    }
+
     public static bool TryGetCausingException<T>(this Exception exception, out T? exceptionType) where T : Exception
     {
         ArgumentNullException.ThrowIfNull(exception);

@@ -149,6 +149,9 @@ public class MultiConnectionNntpClient(
         int retryCount = 1
     ) where T : UsenetResponse
     {
+        Exception? lastFailure = null;
+        string? failureOperation = null;
+
         while (retryCount >= 0)
         {
             ConnectionLock<INntpClient>? connectionLock = null;
@@ -164,7 +167,8 @@ public class MultiConnectionNntpClient(
             }
             catch (Exception e)
             {
-                circuitBreaker.RecordFailure();
+                lastFailure = e;
+                failureOperation = "CONNECT";
                 LogException(() => connectionLock?.Replace());
                 LogException(() => connectionLock?.Dispose());
                 if (retryCount > 0)
@@ -176,7 +180,7 @@ public class MultiConnectionNntpClient(
 
                 Log.Warning(e, "Error getting connection-lock for provider {Provider}.", providerName);
                 LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved));
-                throw;
+                break;
             }
 
             T? result;
@@ -198,7 +202,8 @@ public class MultiConnectionNntpClient(
             }
             catch (Exception e)
             {
-                circuitBreaker.RecordFailure();
+                lastFailure = e;
+                failureOperation = name;
                 LogException(() => connectionLock?.Replace());
                 LogException(() => connectionLock?.Dispose());
                 if (retryCount > 0)
@@ -210,7 +215,7 @@ public class MultiConnectionNntpClient(
 
                 Log.Warning(e, "Error executing nntp {Command} command for provider {Provider}.", name, providerName);
                 LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved));
-                throw;
+                break;
             }
 
             circuitBreaker.RecordSuccess();
@@ -237,6 +242,27 @@ public class MultiConnectionNntpClient(
                 LogException(() => connectionLock?.Dispose());
                 LogException(() => onConnectionReadyAgain?.Invoke(articleBodyResult));
             }
+        }
+
+        if (lastFailure is not null)
+        {
+            if (lastFailure.IsTimeoutException())
+            {
+                var timeoutFailure = ProviderFailureClassifier.Classify(lastFailure, failureOperation ?? name);
+                Log.Debug(
+                    "Provider {Provider} timeout during {Operation}: {Summary}. Detail: {Detail}. " +
+                    "Not tripping circuit breaker — failing over to another provider.",
+                    providerName,
+                    timeoutFailure.Operation ?? failureOperation ?? name,
+                    timeoutFailure.Summary,
+                    timeoutFailure.Detail);
+            }
+            else
+            {
+                circuitBreaker.RecordFailure(lastFailure, failureOperation ?? name);
+            }
+
+            throw lastFailure;
         }
 
         Log.Error("Unreachable code reached");

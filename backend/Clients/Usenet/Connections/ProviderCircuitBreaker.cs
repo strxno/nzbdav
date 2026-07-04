@@ -21,10 +21,12 @@ public class ProviderCircuitBreaker
 
     private readonly string _providerName;
     private readonly object _lock = new();
+    private readonly List<ProviderFailureInfo> _recentFailures = [];
 
     private int _consecutiveFailures;
     private long _trippedUntilMs;
     private TimeSpan _currentCooldown = InitialCooldown;
+    private ProviderFailureInfo? _lastFailure;
 
     public ProviderCircuitBreaker(string providerName)
     {
@@ -35,9 +37,11 @@ public class ProviderCircuitBreaker
     {
         get
         {
-            var trippedUntil = Volatile.Read(ref _trippedUntilMs);
-            if (trippedUntil == 0) return false;
-            return Environment.TickCount64 < trippedUntil;
+            lock (_lock)
+            {
+                ClearExpiredCooldownLocked();
+                return IsTrippedLocked();
+            }
         }
     }
 
@@ -51,25 +55,94 @@ public class ProviderCircuitBreaker
             _consecutiveFailures = 0;
             _trippedUntilMs = 0;
             _currentCooldown = InitialCooldown;
+            _recentFailures.Clear();
+            _lastFailure = null;
         }
     }
 
-    public void RecordFailure()
+    public void RecordFailure(Exception exception, string? operation = null)
     {
+        var failure = ProviderFailureClassifier.Classify(exception, operation);
+
         lock (_lock)
         {
+            ClearExpiredCooldownLocked();
+
+            // Parallel in-flight requests can all fail together; only trip once per cooldown.
+            if (IsTrippedLocked()) return;
+
+            _lastFailure = failure;
+            _recentFailures.Add(failure);
+            if (_recentFailures.Count > FailureThreshold)
+                _recentFailures.RemoveAt(0);
+
             _consecutiveFailures++;
+
+            Log.Debug(
+                "Provider {Provider} failure {FailureCount}/{FailureThreshold} during {Operation}: " +
+                "{Category} — {Summary}. Detail: {Detail}",
+                _providerName,
+                _consecutiveFailures,
+                FailureThreshold,
+                failure.Operation ?? operation ?? "NNTP",
+                failure.Category,
+                failure.Summary,
+                failure.Detail);
 
             if (_consecutiveFailures < FailureThreshold) return;
 
-            _trippedUntilMs = Environment.TickCount64 + (long)_currentCooldown.TotalMilliseconds;
+            TripLocked();
+        }
+    }
+
+    private void ClearExpiredCooldownLocked()
+    {
+        if (_trippedUntilMs == 0 || Environment.TickCount64 < _trippedUntilMs) return;
+
+        _trippedUntilMs = 0;
+        _consecutiveFailures = 0;
+        _recentFailures.Clear();
+        _lastFailure = null;
+    }
+
+    private bool IsTrippedLocked()
+    {
+        return _trippedUntilMs > 0 && Environment.TickCount64 < _trippedUntilMs;
+    }
+
+    private void TripLocked()
+    {
+        var cooldown = _currentCooldown;
+        _trippedUntilMs = Environment.TickCount64 + (long)cooldown.TotalMilliseconds;
+
+        var lastFailure = _lastFailure;
+        var recentCategories = string.Join(", ", _recentFailures.Select(x => x.Category));
+
+        if (lastFailure is null)
+        {
+            Log.Warning(
+                "Provider {Provider} tripped after {Failures} consecutive failures. Skipping for {Cooldown}s.",
+                _providerName, _consecutiveFailures, cooldown.TotalSeconds);
+        }
+        else
+        {
             Log.Warning(
                 "Provider {Provider} tripped after {Failures} consecutive failures. " +
-                "Skipping for {Cooldown}s.",
-                _providerName, _consecutiveFailures, _currentCooldown.TotalSeconds);
-
-            _currentCooldown = TimeSpan.FromMilliseconds(
-                Math.Min(_currentCooldown.TotalMilliseconds * 2, MaxCooldown.TotalMilliseconds));
+                "Reason: {Category} — {Summary}. " +
+                "Operation: {Operation}. NNTP code: {NntpCode}. Detail: {Detail}. " +
+                "Recent failures: {RecentCategories}. Skipping for {Cooldown}s.",
+                _providerName,
+                _consecutiveFailures,
+                lastFailure.Value.Category,
+                lastFailure.Value.Summary,
+                lastFailure.Value.Operation ?? "NNTP",
+                lastFailure.Value.NntpResponseCode?.ToString() ?? "n/a",
+                lastFailure.Value.Detail,
+                recentCategories,
+                cooldown.TotalSeconds);
         }
+
+        _currentCooldown = TimeSpan.FromMilliseconds(
+            Math.Min(cooldown.TotalMilliseconds * 2, MaxCooldown.TotalMilliseconds));
     }
 }

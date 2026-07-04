@@ -85,6 +85,18 @@ public sealed class DavDatabaseClient(DavDatabaseContext ctx)
             .ConfigureAwait(false);
     }
 
+    public async Task PersistDavNzbFileAsync(DavNzbFile nzbFile, DavItem davItem, CancellationToken ct = default)
+    {
+        if (davItem.FileBlobId.HasValue)
+        {
+            await BlobStore.WriteBlob(nzbFile.Id, nzbFile).ConfigureAwait(false);
+            return;
+        }
+
+        ctx.NzbFiles.Update(nzbFile);
+        await ctx.SaveChangesAsync(ct).ConfigureAwait(false);
+    }
+
     public async Task<DavRarFile?> GetDavRarFileAsync(DavItem davItem, CancellationToken ct = default)
     {
         // attempt to read from blob-store

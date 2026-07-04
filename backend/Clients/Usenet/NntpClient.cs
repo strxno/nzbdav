@@ -97,12 +97,27 @@ public abstract class NntpClient : INntpClient
 
     public virtual NzbFileStream GetFileStream(NzbFile nzbFile, long fileSize, int articleBufferSize)
     {
-        return new NzbFileStream(nzbFile.GetSegmentIds(), fileSize, this, articleBufferSize);
+        return GetFileStream(nzbFile.GetSegmentIds(), fileSize, articleBufferSize);
     }
 
-    public virtual NzbFileStream GetFileStream(string[] segmentIds, long fileSize, int articleBufferSize)
+    public virtual NzbFileStream GetFileStream
+    (
+        string[] segmentIds,
+        long fileSize,
+        int articleBufferSize,
+        long firstPartOffset = 0,
+        int standardPartSize = 0,
+        Func<CancellationToken, Task<(long FirstPartOffset, int StandardPartSize)>>? resolveSeekMapAsync = null
+    )
     {
-        return new NzbFileStream(segmentIds, fileSize, this, articleBufferSize);
+        return new NzbFileStream(
+            segmentIds,
+            fileSize,
+            this,
+            articleBufferSize,
+            firstPartOffset,
+            standardPartSize,
+            resolveSeekMapAsync);
     }
 
     public virtual async Task CheckAllSegmentsAsync

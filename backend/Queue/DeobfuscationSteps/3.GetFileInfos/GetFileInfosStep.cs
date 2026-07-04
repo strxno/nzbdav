@@ -5,6 +5,7 @@ using NzbWebDAV.Models.Nzb;
 using NzbWebDAV.Par2Recovery.Packets;
 using NzbWebDAV.Queue.DeobfuscationSteps._1.FetchFirstSegment;
 using NzbWebDAV.Utils;
+using UsenetSharp.Models;
 
 namespace NzbWebDAV.Queue.DeobfuscationSteps._3.GetFileInfos;
 
@@ -66,6 +67,7 @@ public static class GetFileInfosStep
             ReleaseDate = file.ReleaseDate,
             FileSize = (long?)fileDesc?.FileLength,
             IsRar = file.HasRar4Magic() || file.HasRar5Magic(),
+            FirstSegmentHeader = file.Header,
         };
     }
 
@@ -108,5 +110,6 @@ public static class GetFileInfosStep
         public required DateTimeOffset ReleaseDate { get; init; }
         public long? FileSize { get; init; }
         public bool IsRar { get; init; }
+        public UsenetYencHeader? FirstSegmentHeader { get; init; }
     }
 }

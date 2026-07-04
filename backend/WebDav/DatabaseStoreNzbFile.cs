@@ -1,9 +1,10 @@
-﻿using Microsoft.AspNetCore.Http;
+﻿using System.Collections.Concurrent;
+using Microsoft.AspNetCore.Http;
 using NzbWebDAV.Clients.Usenet;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
-using NzbWebDAV.Streams;
+using NzbWebDAV.Utils;
 using NzbWebDAV.WebDav.Base;
 
 namespace NzbWebDAV.WebDav;
@@ -16,6 +17,8 @@ public class DatabaseStoreNzbFile(
     ConfigManager configManager
 ) : BaseStoreStreamFile(httpContext)
 {
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> SeekMapLocks = new();
+
     public DavItem DavItem => davNzbFile;
     public override string Name => davNzbFile.Name;
     public override string UniqueKey => davNzbFile.Id.ToString();
@@ -25,17 +28,62 @@ public class DatabaseStoreNzbFile(
 
     protected override async Task<Stream> GetStreamAsync(CancellationToken cancellationToken)
     {
-        // store the DavItem being accessed in the http context
         httpContext.Items["DavItem"] = davNzbFile;
 
         var id = davNzbFile.Id;
         var file = await dbClient.GetDavNzbFileAsync(davNzbFile, cancellationToken).ConfigureAwait(false);
         if (file is null) throw new FileNotFoundException($"Could not find nzb file with id: {id}");
-        return GetStream(file);
+
+        return usenetClient.GetFileStream(
+            file.SegmentIds,
+            FileSize,
+            configManager.GetArticleBufferSize(),
+            file.FirstPartOffset,
+            file.StandardPartSize,
+            ct => ResolveSeekMapAsync(file, ct));
     }
 
-    private NzbFileStream GetStream(DavNzbFile nzbFile)
+    private async Task<(long FirstPartOffset, int StandardPartSize)> ResolveSeekMapAsync
+    (
+        DavNzbFile nzbFile,
+        CancellationToken cancellationToken
+    )
     {
-        return usenetClient.GetFileStream(nzbFile.SegmentIds, FileSize, configManager.GetArticleBufferSize());
+        if (nzbFile.StandardPartSize > 0)
+            return (nzbFile.FirstPartOffset, nzbFile.StandardPartSize);
+
+        if (nzbFile.SegmentIds.Length == 0)
+            return (0, 0);
+
+        var semaphore = SeekMapLocks.GetOrAdd(nzbFile.Id, _ => new SemaphoreSlim(1, 1));
+        await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (nzbFile.StandardPartSize > 0)
+                return (nzbFile.FirstPartOffset, nzbFile.StandardPartSize);
+
+            var header = await usenetClient
+                .GetYencHeadersAsync(nzbFile.SegmentIds[0], cancellationToken)
+                .ConfigureAwait(false);
+
+            if (!SegmentSeekMap.TryCreate(
+                    FileSize,
+                    nzbFile.SegmentIds.Length,
+                    header,
+                    out var firstPartOffset,
+                    out var standardPartSize))
+            {
+                return (0, 0);
+            }
+
+            nzbFile.FirstPartOffset = firstPartOffset;
+            nzbFile.StandardPartSize = standardPartSize;
+            await dbClient.PersistDavNzbFileAsync(nzbFile, davNzbFile, cancellationToken).ConfigureAwait(false);
+            return (firstPartOffset, standardPartSize);
+        }
+        finally
+        {
+            semaphore.Release();
+        }
     }
 }

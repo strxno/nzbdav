@@ -17,14 +17,36 @@ public class FileProcessor(
     {
         try
         {
+            var fileSize = fileInfo.FileSize ?? await usenetClient
+                .GetFileSizeAsync(fileInfo.NzbFile, ct)
+                .ConfigureAwait(false);
+
+            long firstPartOffset = 0;
+            var standardPartSize = 0;
+            if (fileInfo.FirstSegmentHeader is not null &&
+                SegmentSeekMap.TryCreate(
+                    fileSize,
+                    fileInfo.NzbFile.Segments.Count,
+                    fileInfo.FirstSegmentHeader,
+                    out firstPartOffset,
+                    out standardPartSize))
+            {
+                // seek map stored below
+            }
+            else
+            {
+                firstPartOffset = 0;
+                standardPartSize = 0;
+            }
+
             return new Result()
             {
                 NzbFile = fileInfo.NzbFile,
                 FileName = fileInfo.FileName,
-                FileSize = fileInfo.FileSize ?? await usenetClient
-                    .GetFileSizeAsync(fileInfo.NzbFile, ct)
-                    .ConfigureAwait(false),
+                FileSize = fileSize,
                 ReleaseDate = fileInfo.ReleaseDate,
+                FirstPartOffset = firstPartOffset,
+                StandardPartSize = standardPartSize,
             };
         }
 
@@ -43,5 +65,7 @@ public class FileProcessor(
         public required string FileName { get; init; }
         public required long FileSize { get; init; }
         public required DateTimeOffset ReleaseDate { get; init; }
+        public long FirstPartOffset { get; init; }
+        public int StandardPartSize { get; init; }
     }
 }

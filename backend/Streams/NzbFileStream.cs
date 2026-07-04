@@ -10,12 +10,20 @@ public class NzbFileStream(
     string[] fileSegmentIds,
     long fileSize,
     INntpClient usenetClient,
-    int articleBufferSize
+    int articleBufferSize,
+    long firstPartOffset = 0,
+    int standardPartSize = 0,
+    Func<CancellationToken, Task<(long FirstPartOffset, int StandardPartSize)>>? resolveSeekMapAsync = null
 ) : FastReadOnlyStream
 {
+    private long _firstPartOffset = firstPartOffset;
+    private int _standardPartSize = standardPartSize;
+    private bool _seekMapResolveAttempted;
     private long _position;
     private bool _disposed;
     private Stream? _innerStream;
+
+    private bool HasSeekMap => _standardPartSize > 0 && fileSegmentIds.Length > 0;
 
     public override bool CanSeek => true;
     public override long Length => fileSize;
@@ -52,6 +60,17 @@ public class NzbFileStream(
         return _position;
     }
 
+    private async Task EnsureSeekMapAsync(CancellationToken cancellationToken)
+    {
+        if (HasSeekMap || _seekMapResolveAttempted || resolveSeekMapAsync is null)
+            return;
+
+        _seekMapResolveAttempted = true;
+        var map = await resolveSeekMapAsync(cancellationToken).ConfigureAwait(false);
+        _firstPartOffset = map.FirstPartOffset;
+        _standardPartSize = map.StandardPartSize;
+    }
+
     private async Task<InterpolationSearch.Result> SeekSegment(long byteOffset, CancellationToken ct)
     {
         return await InterpolationSearch.Find(
@@ -70,11 +89,30 @@ public class NzbFileStream(
     private async Task<Stream> GetFileStream(long rangeStart, CancellationToken cancellationToken)
     {
         if (rangeStart == 0) return GetMultiSegmentStream(0, cancellationToken);
+
+        if (!HasSeekMap)
+            await EnsureSeekMapAsync(cancellationToken).ConfigureAwait(false);
+
+        if (HasSeekMap)
+        {
+            var segmentIndex = SegmentSeekMap.FindSegmentIndex(
+                rangeStart,
+                fileSize,
+                fileSegmentIds.Length,
+                _firstPartOffset,
+                _standardPartSize);
+            var segmentStart = SegmentSeekMap.GetSegmentStartOffset(segmentIndex, _firstPartOffset, _standardPartSize);
+            var stream = GetMultiSegmentStream(segmentIndex, cancellationToken);
+            await stream.DiscardBytesAsync(rangeStart - segmentStart, cancellationToken).ConfigureAwait(false);
+            return stream;
+        }
+
         var foundSegment = await SeekSegment(rangeStart, cancellationToken).ConfigureAwait(false);
-        var stream = GetMultiSegmentStream(foundSegment.FoundIndex, cancellationToken);
-        await stream.DiscardBytesAsync(rangeStart - foundSegment.FoundByteRange.StartInclusive, cancellationToken)
+        var fallbackStream = GetMultiSegmentStream(foundSegment.FoundIndex, cancellationToken);
+        await fallbackStream
+            .DiscardBytesAsync(rangeStart - foundSegment.FoundByteRange.StartInclusive, cancellationToken)
             .ConfigureAwait(false);
-        return stream;
+        return fallbackStream;
     }
 
     private Stream GetMultiSegmentStream(int firstSegmentIndex, CancellationToken cancellationToken)

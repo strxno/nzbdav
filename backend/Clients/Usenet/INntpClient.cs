@@ -59,7 +59,12 @@ public interface INntpClient : IDisposable
         NzbFile nzbFile, long fileSize, int articleBufferSize);
 
     NzbFileStream GetFileStream(
-        string[] segmentIds, long fileSize, int articleBufferSize);
+        string[] segmentIds,
+        long fileSize,
+        int articleBufferSize,
+        long firstPartOffset = 0,
+        int standardPartSize = 0,
+        Func<CancellationToken, Task<(long FirstPartOffset, int StandardPartSize)>>? resolveSeekMapAsync = null);
 
     Task CheckAllSegmentsAsync(
         IEnumerable<string> segmentIds, int concurrency, IProgress<int>? progress, CancellationToken cancellationToken);

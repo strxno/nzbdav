@@ -23,6 +23,8 @@ public class FileAggregator(DavDatabaseClient dbClient, DavItem mountDirectory, 
             {
                 Id = Guid.NewGuid(),
                 SegmentIds = result.NzbFile.GetSegmentIds(),
+                FirstPartOffset = result.FirstPartOffset,
+                StandardPartSize = result.StandardPartSize,
             };
 
             var davItem = DavItem.New(

@@ -147,14 +147,25 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
         if (!disposing) return;
         _disposed = true;
         _cts.Cancel();
-        _cts.Dispose();
         _stream?.Dispose();
         _streamTasks.Writer.TryComplete();
 
-        // ensure that streams that were never read from the channel get disposed
         while (_streamTasks.Reader.TryRead(out var streamTask))
-            _ = Task.Run(async () => await (await streamTask).DisposeAsync(), CancellationToken.None);
+        {
+            try
+            {
+                if (streamTask.IsCompletedSuccessfully)
+                    streamTask.Result.Dispose();
+                else
+                    _ = Task.Run(async () => await (await streamTask.ConfigureAwait(false)).DisposeAsync(), CancellationToken.None);
+            }
+            catch
+            {
+                // best-effort cleanup
+            }
+        }
 
+        _cts.Dispose();
         base.Dispose(disposing);
     }
 }

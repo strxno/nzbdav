@@ -215,7 +215,7 @@ public sealed class FileAccessSession : IDisposable
             _bytesDelivered / 1024.0 / 1024.0,
             elapsedSeconds,
             effectiveMbps,
-            _segmentsCompleted);
+            Interlocked.Read(ref _segmentsCompleted));
 
         if (snapshots.Count == 0)
         {

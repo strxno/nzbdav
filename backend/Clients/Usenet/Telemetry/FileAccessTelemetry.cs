@@ -59,7 +59,17 @@ public static class FileAccessTelemetry
 
     public static void BindSession(Stream stream, FileAccessSession session)
     {
-        if (stream is IFileAccessSessionStream target)
-            target.FileAccessSession = session;
+        if (TryBindSession(stream, session)) return;
+
+        FileAccessLog.Logger.Debug(
+            "[FileAccess] Could not bind telemetry session to {StreamType}",
+            stream.GetType().Name);
+    }
+
+    private static bool TryBindSession(Stream stream, FileAccessSession session)
+    {
+        if (stream is not IFileAccessSessionStream target) return false;
+        target.FileAccessSession = session;
+        return true;
     }
 }

@@ -1,9 +1,10 @@
 ﻿using System.Security.Cryptography;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Models;
 
 namespace NzbWebDAV.Streams
 {
-    internal sealed class AesDecoderStream : Stream
+    internal sealed class AesDecoderStream : Stream, IFileAccessSessionStream
     {
         private readonly Stream _mStream;
         private Aes _aes; // keep Aes alive for transform lifetime
@@ -88,6 +89,16 @@ namespace NzbWebDAV.Streams
         public override long Length => _mLimit;
         public override bool CanRead => true;
         public override bool CanSeek => true;
+
+        public FileAccessSession? FileAccessSession
+        {
+            get => (_mStream as IFileAccessSessionStream)?.FileAccessSession;
+            set
+            {
+                if (_mStream is IFileAccessSessionStream target)
+                    target.FileAccessSession = value;
+            }
+        }
 
         public override int Read(byte[] buffer, int offset, int count)
         {

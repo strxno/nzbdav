@@ -2,11 +2,18 @@ using NzbWebDAV.Clients.Usenet.Telemetry;
 
 namespace NzbWebDAV.Streams;
 
-public sealed class FileAccessLoggingStream(Stream innerStream, FileAccessSession session) : Stream
+public sealed class FileAccessLoggingStream : Stream
 {
-    private readonly Stream _innerStream = innerStream;
-    private readonly FileAccessSession _session = session;
+    private readonly Stream _innerStream;
+    private readonly FileAccessSession _session;
     private bool _disposed;
+
+    public FileAccessLoggingStream(Stream innerStream, FileAccessSession session)
+    {
+        _innerStream = innerStream;
+        _session = session;
+        FileAccessTelemetry.BindSession(_innerStream, _session);
+    }
 
     public override bool CanRead => _innerStream.CanRead;
     public override bool CanSeek => _innerStream.CanSeek;

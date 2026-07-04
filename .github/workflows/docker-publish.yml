@@ -1,16 +1,14 @@
-name: "Deploy Pre-Release Images"
+name: Publish Docker Image
 
 on:
   push:
     branches:
       - main
-
   workflow_dispatch:
 
 jobs:
   build-and-push:
     runs-on: ubuntu-latest
-    if: "${{ github.repository == 'nzbdav/nzbdav' && !startsWith(github.event.head_commit.message, 'chore(main): release') }}"
 
     permissions:
       contents: read
@@ -35,6 +33,8 @@ jobs:
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v4
+        continue-on-error: true
+        id: login-dockerhub
         with:
           registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -44,12 +44,14 @@ jobs:
         id: set_vars
         run: |
           GHCR_REPO="ghcr.io/${{ github.repository }}"
-          DOCKERHUB_REPO="nzbdav/nzbdav"
-          echo "NZBDAV_VERSION=$(date +%Y-%m-%d)" >> $GITHUB_OUTPUT
+          DOCKERHUB_REPO="${{ github.repository_owner }}/nzbdav"
+          echo "NZBDAV_VERSION=$(date +%Y-%m-%d)+fork" >> $GITHUB_OUTPUT
           {
             echo "TAGS<<EOF"
-            echo "${GHCR_REPO}:pre-release"
-            echo "${DOCKERHUB_REPO}:pre-release"
+            echo "${GHCR_REPO}:latest"
+            if [ "${{ steps.login-dockerhub.outcome }}" = "success" ]; then
+              echo "docker.io/${DOCKERHUB_REPO}:latest"
+            fi
             echo "EOF"
           } >> $GITHUB_OUTPUT
 

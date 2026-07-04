@@ -6,6 +6,7 @@ using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
 using NzbWebDAV.Streams;
+using NzbWebDAV.Utils;
 using NzbWebDAV.WebDav.Base;
 
 namespace NzbWebDAV.WebDav;
@@ -36,8 +37,12 @@ public class DatabaseStoreRarFile(
 
         var meta = rarFile.ToDavMultipartFileMeta();
         var segmentCount = meta.FileParts.Sum(x => x.SegmentIds.Length);
-        var articleBufferSize = configManager.GetArticleBufferSize();
-        var stream = GetStream(rarFile);
+        var articleBufferSize = ArticleBufferSizeUtil.ForHttpRequest(
+            httpContext,
+            FileSize,
+            segmentCount,
+            configManager.GetArticleBufferSize());
+        var stream = GetStream(rarFile, articleBufferSize);
 
         return FileAccessStreamFactory.Wrap(
             stream,
@@ -49,13 +54,13 @@ public class DatabaseStoreRarFile(
             ct);
     }
 
-    private DavMultipartFileStream GetStream(DavRarFile rarFile)
+    private DavMultipartFileStream GetStream(DavRarFile rarFile, int articleBufferSize)
     {
         return new DavMultipartFileStream
         (
             rarFile.ToDavMultipartFileMeta().FileParts,
             usenetClient,
-            configManager.GetArticleBufferSize()
+            articleBufferSize
         );
     }
 }

@@ -17,6 +17,7 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
     private readonly ContextualCancellationTokenSource _cts;
     private Stream? _stream;
     private bool _disposed;
+    private int _downloadStarted;
 
     public static Stream Create
     (
@@ -46,6 +47,11 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
         _baseSegmentIndex = baseSegmentIndex;
         _streamTasks = Channel.CreateBounded<Task<Stream>>(articleBufferSize);
         _cts = ContextualCancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    }
+
+    private void EnsureDownloadStarted()
+    {
+        if (Interlocked.CompareExchange(ref _downloadStarted, 1, 0) != 0) return;
         _ = DownloadSegments(_cts.Token);
     }
 
@@ -100,6 +106,7 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
         ThrowIfDisposed();
+        EnsureDownloadStarted();
 
         while (!cancellationToken.IsCancellationRequested)
         {

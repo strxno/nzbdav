@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using NzbWebDAV.Clients.Usenet.Contexts;
 using NzbWebDAV.Extensions;
 using NzbWebDAV.Streams;
+using NzbWebDAV.Utils;
 
 namespace NzbWebDAV.Clients.Usenet.Telemetry;
 
@@ -20,14 +21,20 @@ public static class FileAccessStreamFactory
             return inner;
 
         var rangeHeader = httpContext.Request.Headers.Range.ToString();
-        var rangeStart = ParseRangeStart(rangeHeader);
+        var rangeStart = ArticleBufferSizeUtil.TryParseByteRange(rangeHeader, fileSize, out var start, out _)
+            ? start
+            : 0;
+        var effectiveBuffer = ArticleBufferSizeUtil.ForHttpRequest(
+            httpContext, fileSize, segmentCount, articleBufferSize);
+
         var session = new FileAccessSession(
             fileName,
             fileSize,
             rangeStart,
             segmentCount,
-            articleBufferSize,
-            string.IsNullOrWhiteSpace(rangeHeader) ? null : rangeHeader);
+            effectiveBuffer,
+            string.IsNullOrWhiteSpace(rangeHeader) ? null : rangeHeader,
+            articleBufferSize);
 
         var holder = new FileAccessSessionHolder(session);
         var tokenContext = cancellationToken.SetContext(holder);
@@ -38,19 +45,5 @@ public static class FileAccessStreamFactory
         });
 
         return new FileAccessLoggingStream(inner, new FileAccessSessionScope(session));
-    }
-
-    private static long ParseRangeStart(string rangeHeader)
-    {
-        if (string.IsNullOrWhiteSpace(rangeHeader)) return 0;
-
-        var equalsIndex = rangeHeader.IndexOf('=');
-        if (equalsIndex < 0) return 0;
-
-        var dashIndex = rangeHeader.IndexOf('-', equalsIndex + 1);
-        if (dashIndex < 0) return 0;
-
-        var startPart = rangeHeader[(equalsIndex + 1)..dashIndex].Trim();
-        return long.TryParse(startPart, out var start) ? start : 0;
     }
 }

@@ -11,6 +11,7 @@ public sealed class FileAccessSession : IDisposable
     private readonly long _startOffset;
     private readonly int _segmentCount;
     private readonly int _articleBufferSize;
+    private readonly int _configuredMax;
     private readonly string? _rangeHeader;
     private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
     private readonly ConcurrentDictionary<string, ProviderSessionStats> _providerStats = new();
@@ -27,13 +28,15 @@ public sealed class FileAccessSession : IDisposable
         long startOffset,
         int segmentCount,
         int articleBufferSize,
-        string? rangeHeader)
+        string? rangeHeader,
+        int configuredMax = 0)
     {
         _fileName = fileName;
         _fileSize = fileSize;
         _startOffset = startOffset;
         _segmentCount = segmentCount;
         _articleBufferSize = articleBufferSize;
+        _configuredMax = configuredMax;
         _rangeHeader = rangeHeader;
 
         if (string.IsNullOrWhiteSpace(_rangeHeader))
@@ -50,12 +53,13 @@ public sealed class FileAccessSession : IDisposable
         else
         {
             FileAccessLog.Logger.Debug(
-                "[FileAccess] Started {FileName} ({FileSizeMB:F1} MB, {SegmentCount} segments, offset {StartOffset}, buffer {ArticleBufferSize}){Range}",
+                "[FileAccess] Started {FileName} ({FileSizeMB:F1} MB, {SegmentCount} segments, offset {StartOffset}, buffer {ArticleBufferSize}, max {ConfiguredMax}){Range}",
                 _fileName,
                 _fileSize / 1024.0 / 1024.0,
                 _segmentCount,
                 _startOffset,
                 _articleBufferSize,
+                _configuredMax,
                 $" range={_rangeHeader}");
         }
     }

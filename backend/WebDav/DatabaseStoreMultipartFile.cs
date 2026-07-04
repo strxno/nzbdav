@@ -6,6 +6,7 @@ using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
 using NzbWebDAV.Streams;
+using NzbWebDAV.Utils;
 using NzbWebDAV.WebDav.Base;
 
 namespace NzbWebDAV.WebDav;
@@ -35,8 +36,12 @@ public class DatabaseStoreMultipartFile(
         if (multipartFile is null) throw new FileNotFoundException($"Could not find nzb file with id: {id}");
 
         var segmentCount = multipartFile.Metadata.FileParts.Sum(x => x.SegmentIds.Length);
-        var articleBufferSize = configManager.GetArticleBufferSize();
-        var stream = GetStream(multipartFile);
+        var articleBufferSize = ArticleBufferSizeUtil.ForHttpRequest(
+            httpContext,
+            FileSize,
+            segmentCount,
+            configManager.GetArticleBufferSize());
+        var stream = GetStream(multipartFile, articleBufferSize);
 
         return FileAccessStreamFactory.Wrap(
             stream,
@@ -48,12 +53,12 @@ public class DatabaseStoreMultipartFile(
             ct);
     }
 
-    private Stream GetStream(DavMultipartFile multipartFile)
+    private Stream GetStream(DavMultipartFile multipartFile, int articleBufferSize)
     {
         var packedStream = new DavMultipartFileStream(
             multipartFile.Metadata.FileParts,
             usenetClient,
-            configManager.GetArticleBufferSize()
+            articleBufferSize
         );
 
         return multipartFile.Metadata.AesParams != null

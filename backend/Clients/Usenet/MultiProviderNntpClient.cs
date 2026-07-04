@@ -161,10 +161,10 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
             if (lastException is not null)
             {
                 var msg = lastException.SourceException.Message;
-                if (FileAccessTelemetry.CurrentSession is not null)
+                if (FileAccessTelemetry.ResolveSession(cancellationToken) is not null)
                 {
-                    Log.Information(
-                        "[FileAccess] Provider {Provider} failed for {Operation} on {SegmentId}, trying next provider: {Message}",
+                    FileAccessLog.Logger.Information(
+                        "Provider {Provider} failed for {Operation} on {SegmentId}, trying next provider: {Message}",
                         provider.ProviderHost,
                         operation,
                         FormatSegmentId(segmentId),
@@ -186,6 +186,7 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
                 if (!isLastProvider && result.ResponseType == UsenetResponseType.NoArticleWithThatMessageId)
                 {
                     FileAccessTelemetry.RecordProviderMissingArticle(
+                        cancellationToken,
                         provider.ProviderHost,
                         operation,
                         segmentId,
@@ -195,10 +196,10 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
 
                 ProviderSelectionContext.LastProviderHost = provider.ProviderHost;
 
-                if (lastException is not null && FileAccessTelemetry.CurrentSession is not null)
+                if (lastException is not null && FileAccessTelemetry.ResolveSession(cancellationToken) is not null)
                 {
-                    Log.Information(
-                        "[FileAccess] {Operation} on {SegmentId} succeeded on provider {Provider} after failover in {ElapsedMs:F0}ms",
+                    FileAccessLog.Logger.Information(
+                        "{Operation} on {SegmentId} succeeded on provider {Provider} after failover in {ElapsedMs:F0}ms",
                         operation,
                         FormatSegmentId(segmentId),
                         provider.ProviderHost,
@@ -212,6 +213,7 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
                 stopwatch.Stop();
                 var failure = ProviderFailureClassifier.Classify(e, operation);
                 FileAccessTelemetry.RecordProviderAttemptFailure(
+                    cancellationToken,
                     provider.ProviderHost,
                     operation,
                     segmentId,

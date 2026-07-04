@@ -44,7 +44,8 @@ public class DatabaseStoreMultipartFile(
             FileSize,
             segmentCount,
             articleBufferSize,
-            httpContext);
+            httpContext,
+            ct);
     }
 
     private Stream GetStream(DavMultipartFile multipartFile)

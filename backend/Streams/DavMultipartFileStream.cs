@@ -15,6 +15,7 @@ public class DavMultipartFileStream(
     private long _position = 0;
     private CombinedStream? _innerStream;
     private bool _disposed;
+    private CancellationToken _telemetryCancellationToken;
 
 
     public override void Flush()
@@ -29,6 +30,7 @@ public class DavMultipartFileStream(
 
     public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
     {
+        _telemetryCancellationToken = cancellationToken;
         if (_innerStream == null) _innerStream = GetFileStream(_position);
         var read = await _innerStream.ReadAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
         _position += read;
@@ -41,7 +43,7 @@ public class DavMultipartFileStream(
             : origin == SeekOrigin.Current ? _position + offset
             : throw new InvalidOperationException("SeekOrigin must be Begin or Current.");
         if (_position == absoluteOffset) return _position;
-        FileAccessTelemetry.RecordSeek(absoluteOffset, "multipart-part-index");
+        FileAccessTelemetry.RecordSeek(_telemetryCancellationToken, absoluteOffset, "multipart-part-index");
         _position = absoluteOffset;
         _innerStream?.Dispose();
         _innerStream = null;

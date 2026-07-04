@@ -8,6 +8,7 @@ using NzbWebDAV.Api.SabControllers;
 using NzbWebDAV.Auth;
 using NzbWebDAV.Clients.Rclone;
 using NzbWebDAV.Clients.Usenet;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Extensions;
@@ -39,8 +40,10 @@ class Program
         var defaultLevel = LogEventLevel.Information;
         var envLevel = EnvironmentUtil.GetEnvironmentVariable("LOG_LEVEL");
         var level = Enum.TryParse<LogEventLevel>(envLevel, true, out var parsed) ? parsed : defaultLevel;
+        var fileAccessLevel = level <= LogEventLevel.Information ? level : LogEventLevel.Information;
         Log.Logger = new LoggerConfiguration()
             .MinimumLevel.Is(level)
+            .MinimumLevel.Override(FileAccessLog.SourceContextName, fileAccessLevel)
             .MinimumLevel.Override("NWebDAV", LogEventLevel.Warning)
             .MinimumLevel.Override("Microsoft", LogEventLevel.Information)
             .MinimumLevel.Override("Microsoft.AspNetCore.Hosting", LogEventLevel.Warning)
@@ -50,8 +53,8 @@ class Program
             .WriteTo.Console(theme: AnsiConsoleTheme.Code)
             .CreateLogger();
 
-        Log.Information(
-            "NZBDAV {Version} starting (log level: {LogLevel}, file access telemetry enabled)",
+        FileAccessLog.Logger.Information(
+            "NZBDAV {Version} starting (global log level: {LogLevel}, file access telemetry enabled)",
             ConfigManager.AppVersion,
             level);
 

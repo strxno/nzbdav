@@ -1,13 +1,13 @@
 name: Publish Docker Image
 
+# Auto-build disabled — push images locally via WSL instead.
+# Re-enable by restoring the push trigger below.
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
   build-and-push:
+    if: false
     runs-on: ubuntu-latest
 
     permissions:

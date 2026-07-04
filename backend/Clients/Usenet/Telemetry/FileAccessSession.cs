@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using NzbWebDAV.Clients.Usenet.Connections;
-using Serilog;
 
 namespace NzbWebDAV.Clients.Usenet.Telemetry;
 
@@ -37,19 +36,33 @@ public sealed class FileAccessSession : IDisposable
         _articleBufferSize = articleBufferSize;
         _rangeHeader = rangeHeader;
 
-        Log.Information(
-            "[FileAccess] Started {FileName} ({FileSizeMB:F1} MB, {SegmentCount} segments, offset {StartOffset}, buffer {ArticleBufferSize}){Range}",
-            _fileName,
-            _fileSize / 1024.0 / 1024.0,
-            _segmentCount,
-            _startOffset,
-            _articleBufferSize,
-            string.IsNullOrWhiteSpace(_rangeHeader) ? "" : $" range={_rangeHeader}");
+        if (string.IsNullOrWhiteSpace(_rangeHeader))
+        {
+            FileAccessLog.Logger.Information(
+                "[FileAccess] Started {FileName} ({FileSizeMB:F1} MB, {SegmentCount} segments, offset {StartOffset}, buffer {ArticleBufferSize}){Range}",
+                _fileName,
+                _fileSize / 1024.0 / 1024.0,
+                _segmentCount,
+                _startOffset,
+                _articleBufferSize,
+                "");
+        }
+        else
+        {
+            FileAccessLog.Logger.Debug(
+                "[FileAccess] Started {FileName} ({FileSizeMB:F1} MB, {SegmentCount} segments, offset {StartOffset}, buffer {ArticleBufferSize}){Range}",
+                _fileName,
+                _fileSize / 1024.0 / 1024.0,
+                _segmentCount,
+                _startOffset,
+                _articleBufferSize,
+                $" range={_rangeHeader}");
+        }
     }
 
     public void RecordSeek(long targetOffset, string strategy)
     {
-        Log.Debug(
+        FileAccessLog.Logger.Debug(
             "[FileAccess] {FileName} seek to {Offset} ({Strategy})",
             _fileName,
             targetOffset,
@@ -58,7 +71,7 @@ public sealed class FileAccessSession : IDisposable
 
     public void RecordSeekMapResolved(long firstPartOffset, int standardPartSize)
     {
-        Log.Debug(
+        FileAccessLog.Logger.Debug(
             "[FileAccess] {FileName} seek map resolved (firstPartOffset={FirstPartOffset}, standardPartSize={StandardPartSize})",
             _fileName,
             firstPartOffset,
@@ -77,7 +90,7 @@ public sealed class FileAccessSession : IDisposable
             missingArticle: failure.Category == ProviderFailureCategory.MissingArticle,
             timeout: failure.Category == ProviderFailureCategory.Timeout);
 
-        Log.Information(
+        FileAccessLog.Logger.Information(
             "[FileAccess] {FileName} provider {Provider} failed {Operation} on {SegmentId} after {ElapsedMs:F0}ms " +
             "({Category}: {Summary})",
             _fileName,
@@ -94,7 +107,7 @@ public sealed class FileAccessSession : IDisposable
         var stats = _providerStats.GetOrAdd(providerHost, static host => new ProviderSessionStats(host));
         stats.RecordAttemptFailure(missingArticle: true, timeout: false);
 
-        Log.Information(
+        FileAccessLog.Logger.Information(
             "[FileAccess] {FileName} provider {Provider} missing article for {Operation} on {SegmentId} after {ElapsedMs:F0}ms",
             _fileName,
             providerHost,
@@ -117,7 +130,7 @@ public sealed class FileAccessSession : IDisposable
         Interlocked.Add(ref _bytesDelivered, bytes);
         var segmentsCompleted = Interlocked.Increment(ref _segmentsCompleted);
 
-        Log.Debug(
+        FileAccessLog.Logger.Debug(
             "[FileAccess] {FileName} segment {SegmentIndex} from {Provider} ({SegmentId}): {Bytes} bytes, " +
             "ttfb {TtfbMs:F0}ms, transfer {TransferMs:F0}ms, {ThroughputMbps:F2} Mbit/s",
             _fileName,
@@ -137,6 +150,17 @@ public sealed class FileAccessSession : IDisposable
         if (Interlocked.Exchange(ref _completed, true)) return;
 
         _stopwatch.Stop();
+
+        if (_bytesDelivered == 0 && _segmentsCompleted == 0)
+        {
+            FileAccessLog.Logger.Debug(
+                "[FileAccess] Closed {FileName} with no data read after {ElapsedMs:F0}ms{Range}",
+                _fileName,
+                _stopwatch.Elapsed.TotalMilliseconds,
+                string.IsNullOrWhiteSpace(_rangeHeader) ? "" : $" range={_rangeHeader}");
+            return;
+        }
+
         var snapshots = _providerStats.Values
             .Select(x => x.Snapshot())
             .OrderByDescending(x => x.ThroughputMbps)
@@ -145,7 +169,7 @@ public sealed class FileAccessSession : IDisposable
         var elapsedSeconds = Math.Max(_stopwatch.Elapsed.TotalSeconds, 0.001);
         var effectiveMbps = _bytesDelivered * 8.0 / (elapsedSeconds * 1_000_000);
 
-        Log.Information(
+        FileAccessLog.Logger.Information(
             "[FileAccess] Finished {FileName}: delivered {DeliveredMB:F1} MB in {ElapsedSeconds:F1}s " +
             "(effective {EffectiveMbps:F2} Mbit/s, {SegmentsCompleted} segments read)",
             _fileName,
@@ -156,13 +180,15 @@ public sealed class FileAccessSession : IDisposable
 
         if (snapshots.Count == 0)
         {
-            Log.Information("[FileAccess] {FileName}: no provider download stats recorded.", _fileName);
+            FileAccessLog.Logger.Information(
+                "[FileAccess] {FileName}: no provider download stats recorded.",
+                _fileName);
             return;
         }
 
         foreach (var snapshot in snapshots)
         {
-            Log.Information(
+            FileAccessLog.Logger.Information(
                 "[FileAccess] {FileName} provider {Provider}: {SegmentsOk} segments, {BytesMB:F1} MB, " +
                 "{ThroughputMbps:F2} Mbit/s avg, {AvgTtfbMs:F0}ms avg ttfb, " +
                 "{AttemptFailures} failed attempts, {MissingArticles} missing, {Timeouts} timeouts",
@@ -183,7 +209,7 @@ public sealed class FileAccessSession : IDisposable
         if (Interlocked.Exchange(ref _completed, true)) return;
 
         _stopwatch.Stop();
-        Log.Information(
+        FileAccessLog.Logger.Information(
             "[FileAccess] Cancelled {FileName} after {ElapsedSeconds:F1}s ({DeliveredMB:F1} MB delivered)",
             _fileName,
             _stopwatch.Elapsed.TotalSeconds,
@@ -216,7 +242,7 @@ public sealed class FileAccessSession : IDisposable
 
         var percent = _fileSize > 0 ? 100.0 * _bytesDelivered / _fileSize : 0;
 
-        Log.Information(
+        FileAccessLog.Logger.Information(
             "[FileAccess] {FileName} progress: {Percent:F1}% ({SegmentsCompleted} segments, {DeliveredMB:F1} MB). " +
             "Providers: {ProviderSummary}",
             _fileName,

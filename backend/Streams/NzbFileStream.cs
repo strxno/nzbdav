@@ -23,6 +23,7 @@ public class NzbFileStream(
     private long _position;
     private bool _disposed;
     private Stream? _innerStream;
+    private CancellationToken _telemetryCancellationToken;
 
     private bool HasSeekMap => _standardPartSize > 0 && fileSegmentIds.Length > 0;
 
@@ -42,6 +43,7 @@ public class NzbFileStream(
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
     {
+        _telemetryCancellationToken = cancellationToken;
         if (_position >= fileSize) return 0;
         _innerStream ??= await GetFileStream(_position, cancellationToken).ConfigureAwait(false);
         var read = await _innerStream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
@@ -56,7 +58,7 @@ public class NzbFileStream(
             : throw new InvalidOperationException("SeekOrigin must be Begin or Current.");
         if (_position == absoluteOffset) return _position;
         var strategy = HasSeekMap ? "seek-map" : "interpolation-search";
-        FileAccessTelemetry.RecordSeek(absoluteOffset, strategy);
+        FileAccessTelemetry.RecordSeek(_telemetryCancellationToken, absoluteOffset, strategy);
         _position = absoluteOffset;
         _innerStream?.Dispose();
         _innerStream = null;
@@ -72,7 +74,7 @@ public class NzbFileStream(
         var map = await resolveSeekMapAsync(cancellationToken).ConfigureAwait(false);
         _firstPartOffset = map.FirstPartOffset;
         _standardPartSize = map.StandardPartSize;
-        FileAccessTelemetry.RecordSeekMapResolved(_firstPartOffset, _standardPartSize);
+        FileAccessTelemetry.RecordSeekMapResolved(_telemetryCancellationToken, _firstPartOffset, _standardPartSize);
     }
 
     private async Task<InterpolationSearch.Result> SeekSegment(long byteOffset, CancellationToken ct)

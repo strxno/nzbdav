@@ -51,7 +51,8 @@ public class DatabaseStoreNzbFile(
             FileSize,
             file.SegmentIds.Length,
             articleBufferSize,
-            httpContext);
+            httpContext,
+            cancellationToken);
     }
 
     private async Task<(long FirstPartOffset, int StandardPartSize)> ResolveSeekMapAsync

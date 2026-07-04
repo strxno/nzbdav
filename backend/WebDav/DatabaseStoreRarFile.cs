@@ -45,7 +45,8 @@ public class DatabaseStoreRarFile(
             FileSize,
             segmentCount,
             articleBufferSize,
-            httpContext);
+            httpContext,
+            ct);
     }
 
     private DavMultipartFileStream GetStream(DavRarFile rarFile)

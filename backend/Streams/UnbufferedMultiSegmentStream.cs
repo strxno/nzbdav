@@ -41,7 +41,8 @@ public class UnbufferedMultiSegmentStream : FastReadOnlyNonSeekableStream
                     body.Stream,
                     segmentId,
                     segmentIndex,
-                    stopwatch.Elapsed);
+                    stopwatch.Elapsed,
+                    cancellationToken);
             }
 
             // read from the stream

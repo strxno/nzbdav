@@ -93,7 +93,8 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
             bodyResponse.Stream,
             segmentId,
             segmentIndex,
-            stopwatch.Elapsed);
+            stopwatch.Elapsed,
+            cancellationToken);
     }
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)

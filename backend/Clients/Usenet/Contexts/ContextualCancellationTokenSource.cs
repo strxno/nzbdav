@@ -1,4 +1,5 @@
-﻿using NzbWebDAV.Extensions;
+﻿using NzbWebDAV.Clients.Usenet.Telemetry;
+using NzbWebDAV.Extensions;
 
 namespace NzbWebDAV.Clients.Usenet.Contexts;
 
@@ -20,7 +21,7 @@ public class ContextualCancellationTokenSource : IDisposable
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(linkedToken);
         var contextualCts = new ContextualCancellationTokenSource(cts);
-        contextualCts.SetContext(linkedToken.GetContext<DownloadPriorityContext>());
+        contextualCts.CopyRequestContexts(linkedToken);
         return contextualCts;
     }
 
@@ -32,9 +33,15 @@ public class ContextualCancellationTokenSource : IDisposable
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(linkedToken1, linkedToken2);
         var contextualCts = new ContextualCancellationTokenSource(cts);
-        contextualCts.SetContext(linkedToken1.GetContext<DownloadPriorityContext>());
-        contextualCts.SetContext(linkedToken2.GetContext<DownloadPriorityContext>());
+        contextualCts.CopyRequestContexts(linkedToken1);
+        contextualCts.CopyRequestContexts(linkedToken2);
         return contextualCts;
+    }
+
+    private void CopyRequestContexts(CancellationToken sourceToken)
+    {
+        SetContext(sourceToken.GetContext<DownloadPriorityContext>());
+        SetContext(sourceToken.GetContext<FileAccessSessionHolder>());
     }
 
     private void SetContext<T>(T? value)

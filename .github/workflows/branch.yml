@@ -1,16 +1,12 @@
 name: "Deploy Branch Images"
 
+# Auto-build disabled — push images locally via WSL instead.
 on:
-  push:
-    branches:
-      - '**'
-      - '!main'
-      - '!dependabot/**'
-
   workflow_dispatch:
 
 jobs:
   build-and-push:
+    if: false
     runs-on: ubuntu-latest
 
     permissions:

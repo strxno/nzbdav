@@ -5,6 +5,5 @@ internal sealed class FileAccessSessionScope(FileAccessSession session) : IDispo
     public void Dispose()
     {
         session.Complete();
-        FileAccessTelemetry.ClearSession(session);
     }
 }

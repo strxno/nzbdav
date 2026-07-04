@@ -10,6 +10,7 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
+    if: github.repository == 'nzbdav/nzbdav'
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       major: ${{ steps.release.outputs.major }}

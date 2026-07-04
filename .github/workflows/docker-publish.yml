@@ -45,12 +45,15 @@ jobs:
         run: |
           GHCR_REPO="ghcr.io/${{ github.repository }}"
           DOCKERHUB_REPO="${{ github.repository_owner }}/nzbdav"
-          echo "NZBDAV_VERSION=$(date +%Y-%m-%d)+fork" >> $GITHUB_OUTPUT
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "NZBDAV_VERSION=$(date +%Y-%m-%d)+fork.${SHORT_SHA}" >> $GITHUB_OUTPUT
           {
             echo "TAGS<<EOF"
             echo "${GHCR_REPO}:latest"
+            echo "${GHCR_REPO}:sha-${SHORT_SHA}"
             if [ "${{ steps.login-dockerhub.outcome }}" = "success" ]; then
               echo "docker.io/${DOCKERHUB_REPO}:latest"
+              echo "docker.io/${DOCKERHUB_REPO}:sha-${SHORT_SHA}"
             fi
             echo "EOF"
           } >> $GITHUB_OUTPUT

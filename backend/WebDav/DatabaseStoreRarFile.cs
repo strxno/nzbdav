@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using NzbWebDAV.Clients.Usenet;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
@@ -32,7 +33,19 @@ public class DatabaseStoreRarFile(
         var id = davRarFile.Id;
         var rarFile = await dbClient.GetDavRarFileAsync(davRarFile, ct).ConfigureAwait(false);
         if (rarFile is null) throw new FileNotFoundException($"Could not find nzb file with id: {id}");
-        return GetStream(rarFile);
+
+        var meta = rarFile.ToDavMultipartFileMeta();
+        var segmentCount = meta.FileParts.Sum(x => x.SegmentIds.Length);
+        var articleBufferSize = configManager.GetArticleBufferSize();
+        var stream = GetStream(rarFile);
+
+        return FileAccessStreamFactory.Wrap(
+            stream,
+            Name,
+            FileSize,
+            segmentCount,
+            articleBufferSize,
+            httpContext);
     }
 
     private DavMultipartFileStream GetStream(DavRarFile rarFile)

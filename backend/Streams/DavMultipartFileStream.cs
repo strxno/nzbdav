@@ -1,6 +1,7 @@
 ﻿using NzbWebDAV.Clients.Usenet;
 using NzbWebDAV.Database.Models;
 using NzbWebDAV.Exceptions;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Extensions;
 
 namespace NzbWebDAV.Streams;
@@ -40,6 +41,7 @@ public class DavMultipartFileStream(
             : origin == SeekOrigin.Current ? _position + offset
             : throw new InvalidOperationException("SeekOrigin must be Begin or Current.");
         if (_position == absoluteOffset) return _position;
+        FileAccessTelemetry.RecordSeek(absoluteOffset, "multipart-part-index");
         _position = absoluteOffset;
         _innerStream?.Dispose();
         _innerStream = null;

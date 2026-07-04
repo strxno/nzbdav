@@ -50,6 +50,11 @@ class Program
             .WriteTo.Console(theme: AnsiConsoleTheme.Code)
             .CreateLogger();
 
+        Log.Information(
+            "NZBDAV {Version} starting (log level: {LogLevel}, file access telemetry enabled)",
+            ConfigManager.AppVersion,
+            level);
+
         // Block upgrades to version 0.6.x
         BlockUpgradesToV06X();
 

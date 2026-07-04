@@ -161,12 +161,21 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
             if (lastException is not null)
             {
                 var msg = lastException.SourceException.Message;
-                Log.Debug(
-                    "[FileAccess] Provider {Provider} failed, trying next provider for {Operation} on {SegmentId}: {Message}",
-                    provider.ProviderHost,
-                    operation,
-                    FormatSegmentId(segmentId),
-                    msg);
+                if (FileAccessTelemetry.CurrentSession is not null)
+                {
+                    Log.Information(
+                        "[FileAccess] Provider {Provider} failed for {Operation} on {SegmentId}, trying next provider: {Message}",
+                        provider.ProviderHost,
+                        operation,
+                        FormatSegmentId(segmentId),
+                        msg);
+                }
+                else
+                {
+                    Log.Debug(
+                        "Encountered error during NNTP Operation: `{Message}`. Trying another provider.",
+                        msg);
+                }
             }
 
             try
@@ -186,9 +195,9 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
 
                 ProviderSelectionContext.LastProviderHost = provider.ProviderHost;
 
-                if (lastException is not null)
+                if (lastException is not null && FileAccessTelemetry.CurrentSession is not null)
                 {
-                    Log.Debug(
+                    Log.Information(
                         "[FileAccess] {Operation} on {SegmentId} succeeded on provider {Provider} after failover in {ElapsedMs:F0}ms",
                         operation,
                         FormatSegmentId(segmentId),

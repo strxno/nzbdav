@@ -77,7 +77,7 @@ public sealed class FileAccessSession : IDisposable
             missingArticle: failure.Category == ProviderFailureCategory.MissingArticle,
             timeout: failure.Category == ProviderFailureCategory.Timeout);
 
-        Log.Debug(
+        Log.Information(
             "[FileAccess] {FileName} provider {Provider} failed {Operation} on {SegmentId} after {ElapsedMs:F0}ms " +
             "({Category}: {Summary})",
             _fileName,
@@ -94,7 +94,7 @@ public sealed class FileAccessSession : IDisposable
         var stats = _providerStats.GetOrAdd(providerHost, static host => new ProviderSessionStats(host));
         stats.RecordAttemptFailure(missingArticle: true, timeout: false);
 
-        Log.Debug(
+        Log.Information(
             "[FileAccess] {FileName} provider {Provider} missing article for {Operation} on {SegmentId} after {ElapsedMs:F0}ms",
             _fileName,
             providerHost,

@@ -13,7 +13,8 @@ public static class FileAccessStreamFactory
         string fileName,
         long fileSize,
         int segmentCount,
-        int articleBufferSize,
+        int effectiveBufferSize,
+        int configuredMax,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
@@ -24,17 +25,15 @@ public static class FileAccessStreamFactory
         var rangeStart = ArticleBufferSizeUtil.TryParseByteRange(rangeHeader, fileSize, out var start, out _)
             ? start
             : 0;
-        var effectiveBuffer = ArticleBufferSizeUtil.ForHttpRequest(
-            httpContext, fileSize, segmentCount, articleBufferSize);
 
         var session = new FileAccessSession(
             fileName,
             fileSize,
             rangeStart,
             segmentCount,
-            effectiveBuffer,
+            effectiveBufferSize,
             string.IsNullOrWhiteSpace(rangeHeader) ? null : rangeHeader,
-            articleBufferSize);
+            configuredMax);
 
         FileAccessTelemetry.BindSession(inner, session);
 

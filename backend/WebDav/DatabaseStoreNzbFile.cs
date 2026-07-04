@@ -36,16 +36,18 @@ public class DatabaseStoreNzbFile(
         var file = await dbClient.GetDavNzbFileAsync(davNzbFile, cancellationToken).ConfigureAwait(false);
         if (file is null) throw new FileNotFoundException($"Could not find nzb file with id: {id}");
 
-        var articleBufferSize = ArticleBufferSizeUtil.ForHttpRequest(
+        var configuredMax = configManager.GetArticleBufferSize();
+        var effectiveBuffer = ArticleBufferSizeUtil.ForHttpRequest(
             httpContext,
             FileSize,
             file.SegmentIds.Length,
-            configManager.GetArticleBufferSize());
+            configuredMax,
+            file.StandardPartSize);
 
         var stream = usenetClient.GetFileStream(
             file.SegmentIds,
             FileSize,
-            articleBufferSize,
+            effectiveBuffer,
             file.FirstPartOffset,
             file.StandardPartSize,
             ct => ResolveSeekMapAsync(file, ct));
@@ -55,7 +57,8 @@ public class DatabaseStoreNzbFile(
             Name,
             FileSize,
             file.SegmentIds.Length,
-            articleBufferSize,
+            effectiveBuffer,
+            configuredMax,
             httpContext,
             cancellationToken);
     }

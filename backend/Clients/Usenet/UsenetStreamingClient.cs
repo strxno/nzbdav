@@ -1,4 +1,5 @@
 ﻿using NzbWebDAV.Clients.Usenet.Connections;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Config;
 using NzbWebDAV.Websocket;
 
@@ -6,17 +7,21 @@ namespace NzbWebDAV.Clients.Usenet;
 
 public class UsenetStreamingClient : WrappingNntpClient
 {
-    public UsenetStreamingClient(ConfigManager configManager, WebsocketManager websocketManager)
-        : base(CreateDownloadingNntpClient(configManager, websocketManager))
+    private readonly ProviderPerformanceStore _performanceStore;
+
+    public UsenetStreamingClient(
+        ConfigManager configManager,
+        WebsocketManager websocketManager,
+        ProviderPerformanceStore performanceStore)
+        : base(CreateDownloadingNntpClient(configManager, websocketManager, performanceStore))
     {
-        // when config changes, create a new MultiProviderClient to use instead.
+        _performanceStore = performanceStore;
+
         configManager.OnConfigChanged += (_, configEventArgs) =>
         {
-            // if unrelated config changed, do nothing
             if (!configEventArgs.ChangedConfig.ContainsKey("usenet.providers")) return;
 
-            // update the connection-pool according to the new config
-            var newUsenetClient = CreateDownloadingNntpClient(configManager, websocketManager);
+            var newUsenetClient = CreateDownloadingNntpClient(configManager, websocketManager, _performanceStore);
             ReplaceUnderlyingClient(newUsenetClient);
         };
     }
@@ -24,17 +29,19 @@ public class UsenetStreamingClient : WrappingNntpClient
     private static DownloadingNntpClient CreateDownloadingNntpClient
     (
         ConfigManager configManager,
-        WebsocketManager websocketManager
+        WebsocketManager websocketManager,
+        ProviderPerformanceStore performanceStore
     )
     {
-        var multiProviderClient = CreateMultiProviderClient(configManager, websocketManager);
+        var multiProviderClient = CreateMultiProviderClient(configManager, websocketManager, performanceStore);
         return new DownloadingNntpClient(multiProviderClient, configManager);
     }
 
     private static MultiProviderNntpClient CreateMultiProviderClient
     (
         ConfigManager configManager,
-        WebsocketManager websocketManager
+        WebsocketManager websocketManager,
+        ProviderPerformanceStore performanceStore
     )
     {
         var providerConfig = configManager.GetUsenetProviderConfig();
@@ -45,7 +52,7 @@ public class UsenetStreamingClient : WrappingNntpClient
                 connectionPoolStats.GetOnConnectionPoolChanged(index)
             ))
             .ToList();
-        return new MultiProviderNntpClient(providerClients);
+        return new MultiProviderNntpClient(providerClients, performanceStore);
     }
 
     private static MultiConnectionNntpClient CreateProviderClient

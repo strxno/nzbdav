@@ -103,6 +103,7 @@ class Program
             .AddWebdavBasicAuthentication(configManager)
             .AddSingleton(configManager)
             .AddSingleton(websocketManager)
+            .AddSingleton<ProviderPerformanceStore>()
             .AddSingleton<UsenetStreamingClient>()
             .AddSingleton<QueueManager>()
             .AddHostedService<HealthCheckService>()

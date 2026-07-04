@@ -5,10 +5,21 @@ namespace NzbWebDAV.Utils;
 public static class ArticleBufferSizeUtil
 {
     /// <summary>
-    /// Caps article prefetch to roughly what the HTTP request needs instead of always
-    /// using the configured global maximum (e.g. 200 segments for a 16 MB range probe).
+    /// Typical decoded payload per Usenet article (~750 KB). Used to cap prefetch when
+    /// segment count is inflated by metadata or uneven multipart layouts.
     /// </summary>
-    public static int ForHttpRequest(HttpContext httpContext, long fileSize, int segmentCount, int configuredMax)
+    private const int TypicalSegmentBytes = 750_000;
+
+    /// <summary>
+    /// Caps article prefetch to roughly what the HTTP range needs instead of always
+    /// using the configured global maximum (e.g. 200 segments for a small JPG range).
+    /// </summary>
+    public static int ForHttpRequest(
+        HttpContext httpContext,
+        long fileSize,
+        int segmentCount,
+        int configuredMax,
+        int standardPartSize = 0)
     {
         if (configuredMax == 0 || segmentCount <= 0 || fileSize <= 0)
             return configuredMax;
@@ -20,18 +31,44 @@ public static class ArticleBufferSizeUtil
         if (!TryParseByteRange(rangeHeader, fileSize, out var rangeStart, out var rangeEnd))
             return configuredMax;
 
+        return ForByteRange(rangeStart, rangeEnd, fileSize, segmentCount, configuredMax, standardPartSize);
+    }
+
+    public static int ForByteRange(
+        long rangeStart,
+        long rangeEnd,
+        long fileSize,
+        int segmentCount,
+        int configuredMax,
+        int standardPartSize = 0)
+    {
+        if (configuredMax == 0 || segmentCount <= 0 || fileSize <= 0)
+            return configuredMax;
+
         var rangeBytes = rangeEnd - rangeStart + 1;
         if (rangeBytes <= 0)
             return Math.Min(configuredMax, segmentCount);
 
-        var avgSegmentBytes = Math.Max(1, fileSize / segmentCount);
-        var segmentsInRange = (int)Math.Ceiling(rangeBytes / (double)avgSegmentBytes);
+        var estimatedSegmentBytes = EstimateSegmentBytes(fileSize, segmentCount, standardPartSize);
+        var segmentsInRange = (int)Math.Ceiling(rangeBytes / (double)estimatedSegmentBytes);
 
-        // Small slack for yEnc overhead and uneven segment sizes.
-        var segmentsFromOffset = segmentCount - (int)Math.Min(segmentCount, rangeStart / avgSegmentBytes);
+        var startSegmentIndex = (int)Math.Min(segmentCount, rangeStart / estimatedSegmentBytes);
+        var segmentsFromOffset = segmentCount - startSegmentIndex;
         var effective = Math.Min(segmentsInRange + 2, segmentsFromOffset);
 
         return Math.Clamp(effective, 1, Math.Min(configuredMax, segmentCount));
+    }
+
+    private static long EstimateSegmentBytes(long fileSize, int segmentCount, int standardPartSize)
+    {
+        if (standardPartSize > 0)
+            return standardPartSize;
+
+        var averageBytes = fileSize / Math.Max(1, segmentCount);
+        if (averageBytes >= TypicalSegmentBytes / 4)
+            return Math.Max(1, averageBytes);
+
+        return TypicalSegmentBytes;
     }
 
     public static bool TryParseByteRange(string rangeHeader, long fileSize, out long start, out long end)

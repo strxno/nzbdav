@@ -37,19 +37,21 @@ public class DatabaseStoreRarFile(
 
         var meta = rarFile.ToDavMultipartFileMeta();
         var segmentCount = meta.FileParts.Sum(x => x.SegmentIds.Length);
-        var articleBufferSize = ArticleBufferSizeUtil.ForHttpRequest(
+        var configuredMax = configManager.GetArticleBufferSize();
+        var effectiveBuffer = ArticleBufferSizeUtil.ForHttpRequest(
             httpContext,
             FileSize,
             segmentCount,
-            configManager.GetArticleBufferSize());
-        var stream = GetStream(rarFile, articleBufferSize);
+            configuredMax);
+        var stream = GetStream(rarFile, effectiveBuffer);
 
         return FileAccessStreamFactory.Wrap(
             stream,
             Name,
             FileSize,
             segmentCount,
-            articleBufferSize,
+            effectiveBuffer,
+            configuredMax,
             httpContext,
             ct);
     }

@@ -10,7 +10,9 @@ using UsenetSharp.Models;
 
 namespace NzbWebDAV.Clients.Usenet;
 
-public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) : NntpClient
+public class MultiProviderNntpClient(
+    List<MultiConnectionNntpClient> providers,
+    ProviderPerformanceStore performanceStore) : NntpClient
 {
     public override Task ConnectAsync(string host, int port, bool useSsl, CancellationToken ct)
     {
@@ -209,6 +211,10 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
 
                 if (!isLastProvider && result.ResponseType == UsenetResponseType.NoArticleWithThatMessageId)
                 {
+                    performanceStore.RecordAttempt(
+                        provider.ProviderHost,
+                        ProviderAttemptOutcome.MissingArticle,
+                        stopwatch.Elapsed);
                     telemetrySession?.RecordProviderAttempt(
                         provider.ProviderHost,
                         operation,
@@ -218,6 +224,10 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
                     continue;
                 }
 
+                performanceStore.RecordAttempt(
+                    provider.ProviderHost,
+                    ProviderAttemptOutcome.Success,
+                    stopwatch.Elapsed);
                 telemetrySession?.RecordProviderAttempt(
                     provider.ProviderHost,
                     operation,
@@ -241,6 +251,13 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
             {
                 stopwatch.Stop();
                 var failure = ProviderFailureClassifier.Classify(e, operation);
+                var outcome = failure.Category switch
+                {
+                    ProviderFailureCategory.MissingArticle => ProviderAttemptOutcome.MissingArticle,
+                    ProviderFailureCategory.Timeout => ProviderAttemptOutcome.Timeout,
+                    _ => ProviderAttemptOutcome.Failed
+                };
+                performanceStore.RecordAttempt(provider.ProviderHost, outcome, stopwatch.Elapsed);
                 if (telemetrySession is not null)
                 {
                     telemetrySession.RecordProviderAttemptFailure(
@@ -269,13 +286,16 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
     {
         var enabled = providers
             .Where(x => x.ProviderType != ProviderType.Disabled)
-            .OrderBy(x => x.ProviderType)
-            .ThenByDescending(x => x.AvailableConnections)
             .ToList();
 
         var healthy = enabled.Where(x => !x.IsTripped).ToList();
+        var candidates = healthy.Count > 0 ? healthy : enabled;
 
-        return healthy.Count > 0 ? healthy : enabled;
+        return candidates
+            .OrderBy(x => x.ProviderType)
+            .ThenByDescending(x => performanceStore.GetSortScore(x.ProviderHost))
+            .ThenByDescending(x => x.AvailableConnections)
+            .ToList();
     }
 
     private static string FormatSegmentId(string? segmentId)

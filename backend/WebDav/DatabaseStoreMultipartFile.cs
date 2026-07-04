@@ -36,19 +36,21 @@ public class DatabaseStoreMultipartFile(
         if (multipartFile is null) throw new FileNotFoundException($"Could not find nzb file with id: {id}");
 
         var segmentCount = multipartFile.Metadata.FileParts.Sum(x => x.SegmentIds.Length);
-        var articleBufferSize = ArticleBufferSizeUtil.ForHttpRequest(
+        var configuredMax = configManager.GetArticleBufferSize();
+        var effectiveBuffer = ArticleBufferSizeUtil.ForHttpRequest(
             httpContext,
             FileSize,
             segmentCount,
-            configManager.GetArticleBufferSize());
-        var stream = GetStream(multipartFile, articleBufferSize);
+            configuredMax);
+        var stream = GetStream(multipartFile, effectiveBuffer);
 
         return FileAccessStreamFactory.Wrap(
             stream,
             Name,
             FileSize,
             segmentCount,
-            articleBufferSize,
+            effectiveBuffer,
+            configuredMax,
             httpContext,
             ct);
     }

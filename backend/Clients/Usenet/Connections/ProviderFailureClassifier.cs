@@ -20,6 +20,9 @@ public static partial class ProviderFailureClassifier
         if (exception.TryGetCausingException<CouldNotLoginToUsenetException>(out _))
             return Build(ProviderFailureCategory.Authentication, "Invalid credentials or auth rejected by server", detail, responseCode, operation);
 
+        if (exception.TryGetCausingException<UsenetArticleNotFoundException>(out _))
+            return Build(ProviderFailureCategory.MissingArticle, "Article not found on provider", detail, responseCode, operation);
+
         if (exception.TryGetCausingException<CouldNotConnectToUsenetException>(out _))
             return ClassifyConnectionFailure(detail, upper, responseCode, operation);
 

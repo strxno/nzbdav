@@ -1,5 +1,8 @@
-﻿using System.Runtime.ExceptionServices;
+﻿using System.Diagnostics;
+using System.Runtime.ExceptionServices;
+using NzbWebDAV.Clients.Usenet.Connections;
 using NzbWebDAV.Clients.Usenet.Models;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Extensions;
 using NzbWebDAV.Models;
 using Serilog;
@@ -21,12 +24,20 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
 
     public override Task<UsenetStatResponse> StatAsync(SegmentId segmentId, CancellationToken cancellationToken)
     {
-        return RunFromPoolWithBackup(x => x.StatAsync(segmentId, cancellationToken), cancellationToken);
+        return RunFromPoolWithBackup(
+            x => x.StatAsync(segmentId, cancellationToken),
+            cancellationToken,
+            "STAT",
+            segmentId);
     }
 
     public override Task<UsenetHeadResponse> HeadAsync(SegmentId segmentId, CancellationToken cancellationToken)
     {
-        return RunFromPoolWithBackup(x => x.HeadAsync(segmentId, cancellationToken), cancellationToken);
+        return RunFromPoolWithBackup(
+            x => x.HeadAsync(segmentId, cancellationToken),
+            cancellationToken,
+            "HEAD",
+            segmentId);
     }
 
     public override Task<UsenetDecodedBodyResponse> DecodedBodyAsync
@@ -35,7 +46,11 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
         CancellationToken cancellationToken
     )
     {
-        return RunFromPoolWithBackup(x => x.DecodedBodyAsync(segmentId, cancellationToken), cancellationToken);
+        return RunFromPoolWithBackup(
+            x => x.DecodedBodyAsync(segmentId, cancellationToken),
+            cancellationToken,
+            "BODY",
+            segmentId);
     }
 
     public override Task<UsenetDecodedArticleResponse> DecodedArticleAsync
@@ -44,12 +59,16 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
         CancellationToken cancellationToken
     )
     {
-        return RunFromPoolWithBackup(x => x.DecodedArticleAsync(segmentId, cancellationToken), cancellationToken);
+        return RunFromPoolWithBackup(
+            x => x.DecodedArticleAsync(segmentId, cancellationToken),
+            cancellationToken,
+            "ARTICLE",
+            segmentId);
     }
 
     public override Task<UsenetDateResponse> DateAsync(CancellationToken cancellationToken)
     {
-        return RunFromPoolWithBackup(x => x.DateAsync(cancellationToken), cancellationToken);
+        return RunFromPoolWithBackup(x => x.DateAsync(cancellationToken), cancellationToken, "DATE");
     }
 
     public override async Task<UsenetDecodedBodyResponse> DecodedBodyAsync
@@ -64,7 +83,9 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
         {
             result = await RunFromPoolWithBackup(
                 x => x.DecodedBodyAsync(segmentId, OnConnectionReadyAgain, cancellationToken),
-                cancellationToken
+                cancellationToken,
+                "BODY",
+                segmentId
             ).ConfigureAwait(false);
         }
         catch
@@ -97,7 +118,9 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
         {
             result = await RunFromPoolWithBackup(
                 x => x.DecodedArticleAsync(segmentId, OnConnectionReadyAgain, cancellationToken),
-                cancellationToken
+                cancellationToken,
+                "ARTICLE",
+                segmentId
             ).ConfigureAwait(false);
         }
         catch
@@ -121,7 +144,9 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
     private async Task<T> RunFromPoolWithBackup<T>
     (
         Func<INntpClient, Task<T>> task,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        string operation,
+        string? segmentId = null
     ) where T : UsenetResponse
     {
         ExceptionDispatchInfo? lastException = null;
@@ -131,25 +156,58 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
             cancellationToken.ThrowIfCancellationRequested();
             var provider = orderedProviders[i];
             var isLastProvider = i == orderedProviders.Count - 1;
+            var stopwatch = Stopwatch.StartNew();
 
             if (lastException is not null)
             {
                 var msg = lastException.SourceException.Message;
-                Log.Debug($"Encountered error during NNTP Operation: `{msg}`. Trying another provider.");
+                Log.Debug(
+                    "[FileAccess] Provider {Provider} failed, trying next provider for {Operation} on {SegmentId}: {Message}",
+                    provider.ProviderHost,
+                    operation,
+                    FormatSegmentId(segmentId),
+                    msg);
             }
 
             try
             {
                 var result = await task.Invoke(provider).ConfigureAwait(false);
+                stopwatch.Stop();
 
-                // if no article with that message-id is found, try again with the next provider.
                 if (!isLastProvider && result.ResponseType == UsenetResponseType.NoArticleWithThatMessageId)
+                {
+                    FileAccessTelemetry.RecordProviderMissingArticle(
+                        provider.ProviderHost,
+                        operation,
+                        segmentId,
+                        stopwatch.Elapsed);
                     continue;
+                }
+
+                ProviderSelectionContext.LastProviderHost = provider.ProviderHost;
+
+                if (lastException is not null)
+                {
+                    Log.Debug(
+                        "[FileAccess] {Operation} on {SegmentId} succeeded on provider {Provider} after failover in {ElapsedMs:F0}ms",
+                        operation,
+                        FormatSegmentId(segmentId),
+                        provider.ProviderHost,
+                        stopwatch.Elapsed.TotalMilliseconds);
+                }
 
                 return result;
             }
             catch (Exception e) when (!e.IsCancellationException())
             {
+                stopwatch.Stop();
+                var failure = ProviderFailureClassifier.Classify(e, operation);
+                FileAccessTelemetry.RecordProviderAttemptFailure(
+                    provider.ProviderHost,
+                    operation,
+                    segmentId,
+                    failure,
+                    stopwatch.Elapsed);
                 lastException = ExceptionDispatchInfo.Capture(e);
             }
         }
@@ -170,6 +228,12 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
 
         // Always return at least one provider so cooldown probes can fire.
         return healthy.Count > 0 ? healthy : enabled;
+    }
+
+    private static string FormatSegmentId(string? segmentId)
+    {
+        if (string.IsNullOrWhiteSpace(segmentId)) return "n/a";
+        return segmentId.Length <= 16 ? segmentId : segmentId[^16..];
     }
 
     public override void Dispose()

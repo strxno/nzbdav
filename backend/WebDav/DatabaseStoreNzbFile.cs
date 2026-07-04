@@ -1,9 +1,11 @@
 ﻿using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Http;
 using NzbWebDAV.Clients.Usenet;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Config;
 using NzbWebDAV.Database;
 using NzbWebDAV.Database.Models;
+using NzbWebDAV.Streams;
 using NzbWebDAV.Utils;
 using NzbWebDAV.WebDav.Base;
 
@@ -34,13 +36,36 @@ public class DatabaseStoreNzbFile(
         var file = await dbClient.GetDavNzbFileAsync(davNzbFile, cancellationToken).ConfigureAwait(false);
         if (file is null) throw new FileNotFoundException($"Could not find nzb file with id: {id}");
 
-        return usenetClient.GetFileStream(
-            file.SegmentIds,
-            FileSize,
-            configManager.GetArticleBufferSize(),
-            file.FirstPartOffset,
-            file.StandardPartSize,
-            ct => ResolveSeekMapAsync(file, ct));
+        var articleBufferSize = configManager.GetArticleBufferSize();
+        var rangeHeader = httpContext.Request.Headers.Range.ToString();
+
+        try
+        {
+            var sessionScope = FileAccessTelemetry.BeginScope(
+                Name,
+                FileSize,
+                startOffset: 0,
+                file.SegmentIds.Length,
+                articleBufferSize,
+                string.IsNullOrWhiteSpace(rangeHeader) ? null : rangeHeader);
+
+            var stream = usenetClient.GetFileStream(
+                file.SegmentIds,
+                FileSize,
+                articleBufferSize,
+                file.FirstPartOffset,
+                file.StandardPartSize,
+                ct => ResolveSeekMapAsync(file, ct));
+
+            return new FileAccessLoggingStream(stream, sessionScope);
+        }
+        catch
+        {
+            FileAccessTelemetry.CurrentSession?.Cancel();
+            if (FileAccessTelemetry.CurrentSession is { } session)
+                FileAccessTelemetry.ClearSession(session);
+            throw;
+        }
     }
 
     private async Task<(long FirstPartOffset, int StandardPartSize)> ResolveSeekMapAsync

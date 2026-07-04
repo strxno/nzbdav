@@ -1,8 +1,9 @@
-﻿using System.Threading.Channels;
+﻿using System.Diagnostics;
+using System.Threading.Channels;
 using NzbWebDAV.Clients.Usenet;
-using NzbWebDAV.Clients.Usenet.Concurrency;
 using NzbWebDAV.Clients.Usenet.Contexts;
 using NzbWebDAV.Clients.Usenet.Models;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using UsenetSharp.Streams;
 
 namespace NzbWebDAV.Streams;
@@ -11,6 +12,7 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
 {
     private readonly Memory<string> _segmentIds;
     private readonly INntpClient _usenetClient;
+    private readonly int _baseSegmentIndex;
     private readonly Channel<Task<Stream>> _streamTasks;
     private readonly ContextualCancellationTokenSource _cts;
     private Stream? _stream;
@@ -21,12 +23,13 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
         Memory<string> segmentIds,
         INntpClient usenetClient,
         int articleBufferSize,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        int baseSegmentIndex = 0
     )
     {
         return articleBufferSize == 0
-            ? new UnbufferedMultiSegmentStream(segmentIds, usenetClient)
-            : new MultiSegmentStream(segmentIds, usenetClient, articleBufferSize, cancellationToken);
+            ? new UnbufferedMultiSegmentStream(segmentIds, usenetClient, baseSegmentIndex)
+            : new MultiSegmentStream(segmentIds, usenetClient, articleBufferSize, cancellationToken, baseSegmentIndex);
     }
 
     private MultiSegmentStream
@@ -34,11 +37,13 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
         Memory<string> segmentIds,
         INntpClient usenetClient,
         int articleBufferSize,
-        CancellationToken cancellationToken
+        CancellationToken cancellationToken,
+        int baseSegmentIndex
     )
     {
         _segmentIds = segmentIds;
         _usenetClient = usenetClient;
+        _baseSegmentIndex = baseSegmentIndex;
         _streamTasks = Channel.CreateBounded<Task<Stream>>(articleBufferSize);
         _cts = ContextualCancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         _ = DownloadSegments(_cts.Token);
@@ -51,10 +56,11 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
             for (var i = 0; i < _segmentIds.Length; i++)
             {
                 var segmentId = _segmentIds.Span[i];
+                var segmentIndex = _baseSegmentIndex + i;
 
                 await _streamTasks.Writer.WaitToWriteAsync(cancellationToken);
                 var connection = await _usenetClient.AcquireExclusiveConnectionAsync(segmentId, cancellationToken);
-                var streamTask = DownloadSegment(segmentId, connection, cancellationToken);
+                var streamTask = DownloadSegment(segmentId, segmentIndex, connection, cancellationToken);
                 if (_streamTasks.Writer.TryWrite(streamTask)) continue;
 
                 // if we never get a chance to write the stream to the writer
@@ -67,21 +73,27 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
         {
             _streamTasks.Writer.TryComplete();
         }
-
-        return;
     }
 
     private async Task<Stream> DownloadSegment
     (
         string segmentId,
+        int segmentIndex,
         UsenetExclusiveConnection exclusiveConnection,
         CancellationToken cancellationToken
     )
     {
+        var stopwatch = Stopwatch.StartNew();
         var bodyResponse = await _usenetClient
             .DecodedBodyAsync(segmentId, exclusiveConnection, cancellationToken)
             .ConfigureAwait(false);
-        return bodyResponse.Stream;
+        stopwatch.Stop();
+
+        return FileAccessTelemetry.WrapSegmentStream(
+            bodyResponse.Stream,
+            segmentId,
+            segmentIndex,
+            stopwatch.Elapsed);
     }
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
@@ -129,6 +141,6 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
         while (_streamTasks.Reader.TryRead(out var streamTask))
             _ = Task.Run(async () => await (await streamTask).DisposeAsync(), CancellationToken.None);
 
-        base.Dispose();
+        base.Dispose(disposing);
     }
 }

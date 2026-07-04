@@ -1,4 +1,5 @@
 ﻿using NzbWebDAV.Clients.Usenet;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Extensions;
 using NzbWebDAV.Models;
 using NzbWebDAV.Utils;
@@ -54,6 +55,8 @@ public class NzbFileStream(
             : origin == SeekOrigin.Current ? _position + offset
             : throw new InvalidOperationException("SeekOrigin must be Begin or Current.");
         if (_position == absoluteOffset) return _position;
+        var strategy = HasSeekMap ? "seek-map" : "interpolation-search";
+        FileAccessTelemetry.RecordSeek(absoluteOffset, strategy);
         _position = absoluteOffset;
         _innerStream?.Dispose();
         _innerStream = null;
@@ -69,6 +72,7 @@ public class NzbFileStream(
         var map = await resolveSeekMapAsync(cancellationToken).ConfigureAwait(false);
         _firstPartOffset = map.FirstPartOffset;
         _standardPartSize = map.StandardPartSize;
+        FileAccessTelemetry.RecordSeekMapResolved(_firstPartOffset, _standardPartSize);
     }
 
     private async Task<InterpolationSearch.Result> SeekSegment(long byteOffset, CancellationToken ct)
@@ -118,7 +122,7 @@ public class NzbFileStream(
     private Stream GetMultiSegmentStream(int firstSegmentIndex, CancellationToken cancellationToken)
     {
         var segmentIds = fileSegmentIds.AsMemory()[firstSegmentIndex..];
-        return MultiSegmentStream.Create(segmentIds, usenetClient, articleBufferSize, cancellationToken);
+        return MultiSegmentStream.Create(segmentIds, usenetClient, articleBufferSize, cancellationToken, firstSegmentIndex);
     }
 
     protected override void Dispose(bool disposing)

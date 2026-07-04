@@ -8,6 +8,7 @@ public enum ProviderFailureCategory
     Timeout,
     Ssl,
     ServerError,
+    MissingArticle,
     Unknown
 }
 

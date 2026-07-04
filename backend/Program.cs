@@ -59,6 +59,12 @@ class Program
         // run database migration, if necessary.
         if (args.Contains("--db-migration"))
         {
+            var bundledMigrations = databaseContext.Database.GetMigrations().ToList();
+            var lastBundledMigration = bundledMigrations.LastOrDefault() ?? "(none)";
+            Console.WriteLine(
+                $"NZBDAV_VERSION={EnvironmentUtil.GetEnvironmentVariable("NZBDAV_VERSION") ?? "unknown"}");
+            Console.WriteLine($"Last bundled migration: {lastBundledMigration}");
+
             var argIndex = args.ToList().IndexOf("--db-migration");
             var targetMigration = args.Length > argIndex + 1 ? args[argIndex + 1] : null;
             await databaseContext.Database

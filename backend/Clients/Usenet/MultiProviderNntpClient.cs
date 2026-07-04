@@ -14,6 +14,7 @@ public class MultiProviderNntpClient(
     List<MultiConnectionNntpClient> providers,
     ProviderPerformanceStore performanceStore) : NntpClient
 {
+    private int _pooledRotationCounter;
     public override Task ConnectAsync(string host, int port, bool useSsl, CancellationToken ct)
     {
         throw new NotSupportedException("Please connect within the connectionFactory");
@@ -291,11 +292,33 @@ public class MultiProviderNntpClient(
         var healthy = enabled.Where(x => !x.IsTripped).ToList();
         var candidates = healthy.Count > 0 ? healthy : enabled;
 
-        return candidates
+        var ordered = candidates
             .OrderBy(x => x.ProviderType)
             .ThenByDescending(x => performanceStore.GetSortScore(x.ProviderHost))
             .ThenByDescending(x => x.AvailableConnections)
             .ToList();
+
+        return RotateTiedPooledProviders(ordered);
+    }
+
+    private List<MultiConnectionNntpClient> RotateTiedPooledProviders(List<MultiConnectionNntpClient> ordered)
+    {
+        var pooled = ordered.Where(x => x.ProviderType == ProviderType.Pooled).ToList();
+        if (pooled.Count <= 1) return ordered;
+
+        var topScore = performanceStore.GetSortScore(pooled[0].ProviderHost);
+        var tied = pooled
+            .TakeWhile(x => Math.Abs(performanceStore.GetSortScore(x.ProviderHost) - topScore) < 0.001)
+            .ToList();
+        if (tied.Count <= 1) return ordered;
+
+        var rotation = Interlocked.Increment(ref _pooledRotationCounter) % tied.Count;
+        if (rotation == 0) return ordered;
+
+        var preferred = tied[rotation];
+        var reordered = new List<MultiConnectionNntpClient>(ordered.Count) { preferred };
+        reordered.AddRange(ordered.Where(x => !ReferenceEquals(x, preferred)));
+        return reordered;
     }
 
     private static string FormatSegmentId(string? segmentId)

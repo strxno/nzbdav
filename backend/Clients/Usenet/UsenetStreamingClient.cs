@@ -70,7 +70,7 @@ public class UsenetStreamingClient : WrappingNntpClient
         return new MultiConnectionNntpClient(connectionPool, connectionDetails.Type, circuitBreaker, connectionDetails.Host);
     }
 
-    private static ConnectionPool<INntpClient> CreateNewConnectionPool
+    public static ConnectionPool<INntpClient> CreateNewConnectionPool
     (
         int maxConnections,
         Func<CancellationToken, ValueTask<INntpClient>> connectionFactory,

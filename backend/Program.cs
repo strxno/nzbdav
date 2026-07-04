@@ -104,6 +104,7 @@ class Program
             .AddSingleton(configManager)
             .AddSingleton(websocketManager)
             .AddSingleton<ProviderPerformanceStore>()
+            .AddSingleton<UsenetProviderSpeedTestService>()
             .AddSingleton<UsenetStreamingClient>()
             .AddSingleton<QueueManager>()
             .AddHostedService<HealthCheckService>()

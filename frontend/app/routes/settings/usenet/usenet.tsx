@@ -4,6 +4,17 @@ import { Button } from "react-bootstrap";
 import { receiveMessage } from "~/utils/websocket-util";
 
 const usenetConnectionsTopic = {'cxs': 'state'};
+const usenetSpeedTestTopic = {'ustp': 'state'};
+
+type SpeedTestResult = {
+    providerIndex: number;
+    host: string;
+    success: boolean;
+    error?: string | null;
+    megabitsPerSecond: number;
+    durationSeconds: number;
+    sortRank: number;
+};
 
 type UsenetSettingsProps = {
     config: Record<string, string>
@@ -64,6 +75,10 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
     const [showModal, setShowModal] = useState(false);
     const [editingIndex, setEditingIndex] = useState<number | null>(null);
     const [connections, setConnections] = useState<{[index: number]: ConnectionCounts}>({});
+    const [isSpeedTesting, setIsSpeedTesting] = useState(false);
+    const [speedTestProgress, setSpeedTestProgress] = useState<string | null>(null);
+    const [speedTestResults, setSpeedTestResults] = useState<Record<string, SpeedTestResult>>({});
+    const [speedTestError, setSpeedTestError] = useState<string | null>(null);
     const providerConfig = useMemo(() => parseProviderConfig(config["usenet.providers"]), [config]);
 
     // handlers
@@ -109,7 +124,56 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
             live: live,
             max: providerConfig.Providers[index]?.MaxConnections || 1
         }}));
-    }, [setConnections]);
+    }, [showModal, providerConfig.Providers]);
+
+    const handleSpeedTestProgress = useCallback((message: string) => {
+        if (message === "done|") {
+            setSpeedTestProgress(null);
+            return;
+        }
+
+        const [completed, total, host, percent] = message.split("|");
+        const completedNum = Number(completed);
+        const totalNum = Number(total) || 1;
+        const percentNum = Number(percent) || 0;
+        const overall = Math.min(100, Math.round(((completedNum + percentNum / 100) / totalNum) * 100));
+        setSpeedTestProgress(`Testing ${host} (${overall}%)`);
+    }, []);
+
+    const handleSpeedTest = useCallback(async () => {
+        setIsSpeedTesting(true);
+        setSpeedTestError(null);
+        setSpeedTestProgress("Starting speed test…");
+
+        try {
+            const response = await fetch('/api/test-usenet-speed', { method: 'POST' });
+            const data = await response.json();
+
+            if (!response.ok || !data.status) {
+                setSpeedTestError(data.error || "Speed test failed");
+                return;
+            }
+
+            const results: Record<string, SpeedTestResult> = {};
+            for (const result of data.results || []) {
+                results[result.host.toLowerCase()] = {
+                    providerIndex: result.providerIndex,
+                    host: result.host,
+                    success: result.success,
+                    error: result.error,
+                    megabitsPerSecond: result.megabitsPerSecond,
+                    durationSeconds: result.durationSeconds,
+                    sortRank: result.sortRank,
+                };
+            }
+            setSpeedTestResults(results);
+        } catch (error) {
+            setSpeedTestError("Network error: " + (error instanceof Error ? error.message : "Unknown error"));
+        } finally {
+            setIsSpeedTesting(false);
+            setSpeedTestProgress(null);
+        }
+    }, []);
 
     // effects
     useEffect(() => {
@@ -117,8 +181,13 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
         let disposed = false;
         function connect() {
             ws = new WebSocket(window.location.origin.replace(/^http/, 'ws'));
-            ws.onmessage = receiveMessage((_, message) => handleConnectionsMessage(message));
-            ws.onopen = () => ws.send(JSON.stringify(usenetConnectionsTopic));
+            ws.onmessage = receiveMessage((topic, message) => {
+                if (topic === 'ustp') handleSpeedTestProgress(message);
+                else handleConnectionsMessage(message);
+            });
+            ws.onopen = () => {
+                ws.send(JSON.stringify({ ...usenetConnectionsTopic, ...usenetSpeedTestTopic }));
+            };
             ws.onerror = () => { ws.close() };
             ws.onclose = onClose;
             return () => { disposed = true; ws.close(); }
@@ -128,7 +197,7 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
             setConnections({});
         }
         return connect();
-    }, [setConnections, handleConnectionsMessage]);
+    }, [handleConnectionsMessage, handleSpeedTestProgress]);
 
     // view
     return (
@@ -136,10 +205,28 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
             <div className={styles.section}>
                 <div className={styles.sectionHeader}>
                     <div>Usenet Providers</div>
-                    <Button variant="primary" size="sm" onClick={handleAddProvider}>
-                        Add
-                    </Button>
+                    <div className={styles.sectionHeaderActions}>
+                        {providerConfig.Providers.length > 0 && (
+                            <Button
+                                variant="outline-primary"
+                                size="sm"
+                                onClick={handleSpeedTest}
+                                disabled={isSpeedTesting}
+                            >
+                                {isSpeedTesting ? "Testing…" : "Speed Test (500MB)"}
+                            </Button>
+                        )}
+                        <Button variant="primary" size="sm" onClick={handleAddProvider}>
+                            Add
+                        </Button>
+                    </div>
                 </div>
+                {speedTestProgress && (
+                    <p className={styles.speedTestProgress}>{speedTestProgress}</p>
+                )}
+                {speedTestError && (
+                    <p className={styles.speedTestError}>{speedTestError}</p>
+                )}
                 {providerConfig.Providers.length === 0 ? (
                     <p className={styles.alertMessage}>
                         No Usenet providers configured.
@@ -147,7 +234,9 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                     </p>
                 ) : (
                     <div className={styles["providers-grid"]}>
-                        {providerConfig.Providers.map((provider, index) => (
+                        {providerConfig.Providers.map((provider, index) => {
+                            const speedResult = speedTestResults[provider.Host.toLowerCase()];
+                            return (
                             <div key={index} className={styles["provider-card"]}>
                                 <div className={styles["provider-card-inner"]}>
                                     <div className={styles["provider-header"]}>
@@ -263,11 +352,30 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                                                 </div>
                                             </div>
 
+                                            <div className={styles["provider-detail-item"]}>
+                                                <div className={styles["provider-detail-icon"]}>
+                                                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                                                        <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
+                                                    </svg>
+                                                </div>
+                                                <div className={styles["provider-detail-content"]}>
+                                                    <span className={styles["provider-detail-label"]}>Speed Test</span>
+                                                    <span className={styles["provider-detail-value"]}>
+                                                        {speedResult?.success
+                                                            ? `#${speedResult.sortRank} · ${speedResult.megabitsPerSecond.toFixed(1)} Mbit/s`
+                                                            : speedResult?.error
+                                                                ? "Failed"
+                                                                : "Not tested"}
+                                                    </span>
+                                                </div>
+                                            </div>
+
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                        ))}
+                            );
+                        })}
                     </div>
                 )}
             </div>

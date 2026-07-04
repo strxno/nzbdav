@@ -25,6 +25,7 @@
 
     <ItemGroup>
       <EmbeddedResource Include="Api\SabControllers\GetConfig\config_template.json" />
+      <EmbeddedResource Include="Resources\NZBGet-Speed-Test-500MB.nzb" />
       <EmbeddedResource Include="WebDav\StaticFiles\root\README.md" />
     </ItemGroup>
 

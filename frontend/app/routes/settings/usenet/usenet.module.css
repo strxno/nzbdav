@@ -14,6 +14,24 @@
     margin-bottom: 20px;
 }
 
+.sectionHeaderActions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.speedTestProgress {
+    color: #93a1a1;
+    margin: -8px 0 16px;
+    font-size: 0.9rem;
+}
+
+.speedTestError {
+    color: #dc322f;
+    margin: -8px 0 16px;
+    font-size: 0.9rem;
+}
+
 .sectionHeader h5 {
     margin: 0;
 }

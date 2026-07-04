@@ -4,26 +4,68 @@ namespace NzbWebDAV.Clients.Usenet.Telemetry;
 
 /// <summary>
 /// Process-wide provider performance scores used to order failover attempts.
-/// Updated on every NNTP attempt; higher score = try sooner.
+/// Updated on every NNTP attempt and by the provider speed test; higher score = try sooner.
 /// </summary>
 public sealed class ProviderPerformanceStore
 {
     private const double ResponseEmaAlpha = 0.15;
 
     private readonly ConcurrentDictionary<string, ProviderPerformanceEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, double> _speedTestMegabitsPerSecond = new(StringComparer.OrdinalIgnoreCase);
 
     public void RecordAttempt(string providerHost, ProviderAttemptOutcome outcome, TimeSpan elapsed)
     {
         if (string.IsNullOrWhiteSpace(providerHost)) return;
 
-        _entries.GetOrAdd(providerHost, static host => new ProviderPerformanceEntry())
+        _entries.GetOrAdd(providerHost, static _ => new ProviderPerformanceEntry())
             .Record(outcome, elapsed.TotalMilliseconds);
+    }
+
+    public void SetSpeedTestResult(string providerHost, double megabitsPerSecond, bool success)
+    {
+        if (string.IsNullOrWhiteSpace(providerHost)) return;
+
+        if (success && megabitsPerSecond > 0)
+        {
+            _speedTestMegabitsPerSecond[providerHost] = megabitsPerSecond;
+            _entries.GetOrAdd(providerHost, static _ => new ProviderPerformanceEntry())
+                .ApplySpeedTestBaseline(megabitsPerSecond);
+            return;
+        }
+
+        _speedTestMegabitsPerSecond.TryRemove(providerHost, out _);
+        RecordAttempt(providerHost, ProviderAttemptOutcome.Failed, TimeSpan.FromSeconds(30));
+    }
+
+    public double? GetSpeedTestMegabitsPerSecond(string providerHost)
+    {
+        if (string.IsNullOrWhiteSpace(providerHost)) return null;
+        return _speedTestMegabitsPerSecond.TryGetValue(providerHost, out var mbps) ? mbps : null;
     }
 
     public double GetSortScore(string providerHost)
     {
         if (string.IsNullOrWhiteSpace(providerHost)) return double.MinValue;
-        return _entries.TryGetValue(providerHost, out var entry) ? entry.GetSortScore() : 0;
+
+        var speedTestBonus = _speedTestMegabitsPerSecond.TryGetValue(providerHost, out var mbps)
+            ? mbps * 10_000
+            : 0;
+
+        var runtimeScore = _entries.TryGetValue(providerHost, out var entry) ? entry.GetSortScore() : 0;
+        return speedTestBonus + runtimeScore;
+    }
+
+    public IReadOnlyList<ProviderPerformanceRanking> GetRankings(IEnumerable<string> providerHosts)
+    {
+        return providerHosts
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(host => new ProviderPerformanceRanking(
+                host,
+                GetSortScore(host),
+                GetSpeedTestMegabitsPerSecond(host)))
+            .OrderByDescending(x => x.SortScore)
+            .Select((ranking, index) => ranking with { Rank = index + 1 })
+            .ToList();
     }
 
     private sealed class ProviderPerformanceEntry
@@ -54,6 +96,18 @@ public sealed class ProviderPerformanceStore
             }
 
             UpdateResponseEma(elapsedMs);
+        }
+
+        public void ApplySpeedTestBaseline(double megabitsPerSecond)
+        {
+            lock (_emaLock)
+            {
+                _successes = 100;
+                _missingArticles = 0;
+                _failures = 0;
+                _timeouts = 0;
+                _emaResponseMs = Math.Max(50, 700_000 * 8 / Math.Max(1, megabitsPerSecond));
+            }
         }
 
         private void UpdateResponseEma(double elapsedMs)
@@ -89,3 +143,9 @@ public sealed class ProviderPerformanceStore
         }
     }
 }
+
+public sealed record ProviderPerformanceRanking(
+    string Host,
+    double SortScore,
+    double? SpeedTestMegabitsPerSecond,
+    int Rank = 0);

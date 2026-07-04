@@ -10,12 +10,14 @@ public class DavMultipartFileStream(
     DavMultipartFile.FilePart[] fileParts,
     INntpClient usenetClient,
     int articleBufferSize
-) : Stream
+) : Stream, IFileAccessSessionStream
 {
     private long _position = 0;
     private CombinedStream? _innerStream;
     private bool _disposed;
     private CancellationToken _telemetryCancellationToken;
+
+    public FileAccessSession? FileAccessSession { get; set; }
 
 
     public override void Flush()
@@ -102,6 +104,7 @@ public class DavMultipartFileStream(
             {
                 var offset = (i == 0) ? additionalOffset : 0;
                 var stream = usenetClient.GetFileStream(x.SegmentIds, x.SegmentIdByteRange.Count, articleBufferSize);
+                stream.FileAccessSession = FileAccessSession;
                 stream.Seek(x.FilePartByteRange.StartInclusive + offset, SeekOrigin.Begin);
                 return Task.FromResult(stream.LimitLength(x.FilePartByteRange.Count - offset));
             });

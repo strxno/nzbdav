@@ -14,11 +14,18 @@ public class UnbufferedMultiSegmentStream : FastReadOnlyNonSeekableStream
     private int _currentIndex;
     private bool _disposed;
 
-    public UnbufferedMultiSegmentStream(Memory<string> segmentIds, INntpClient usenetClient, int baseSegmentIndex = 0)
+    private readonly FileAccessSession? _fileAccessSession;
+
+    public UnbufferedMultiSegmentStream(
+        Memory<string> segmentIds,
+        INntpClient usenetClient,
+        int baseSegmentIndex = 0,
+        FileAccessSession? fileAccessSession = null)
     {
         _segmentIds = segmentIds;
         _usenetClient = usenetClient;
         _baseSegmentIndex = baseSegmentIndex;
+        _fileAccessSession = fileAccessSession;
     }
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
@@ -42,7 +49,8 @@ public class UnbufferedMultiSegmentStream : FastReadOnlyNonSeekableStream
                     segmentId,
                     segmentIndex,
                     stopwatch.Elapsed,
-                    cancellationToken);
+                    cancellationToken,
+                    _fileAccessSession);
             }
 
             // read from the stream

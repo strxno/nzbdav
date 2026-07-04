@@ -48,11 +48,18 @@ public static class FileAccessTelemetry
         string segmentId,
         int segmentIndex,
         TimeSpan ttfb,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        FileAccessSession? session = null)
     {
         var providerHost = ProviderSelectionContext.LastProviderHost ?? "unknown";
-        var session = ResolveSession(cancellationToken);
+        session ??= ResolveSession(cancellationToken);
         return new InstrumentedSegmentStream(
             inner, providerHost, segmentId, segmentIndex, ttfb, session);
+    }
+
+    public static void BindSession(Stream stream, FileAccessSession session)
+    {
+        if (stream is IFileAccessSessionStream target)
+            target.FileAccessSession = session;
     }
 }

@@ -36,6 +36,8 @@ public static class FileAccessStreamFactory
             string.IsNullOrWhiteSpace(rangeHeader) ? null : rangeHeader,
             articleBufferSize);
 
+        FileAccessTelemetry.BindSession(inner, session);
+
         var holder = new FileAccessSessionHolder(session);
         var tokenContext = cancellationToken.SetContext(holder);
         httpContext.Response.OnCompleted(() =>

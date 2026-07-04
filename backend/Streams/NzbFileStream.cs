@@ -15,7 +15,7 @@ public class NzbFileStream(
     long firstPartOffset = 0,
     int standardPartSize = 0,
     Func<CancellationToken, Task<(long FirstPartOffset, int StandardPartSize)>>? resolveSeekMapAsync = null
-) : FastReadOnlyStream
+) : FastReadOnlyStream, IFileAccessSessionStream
 {
     private long _firstPartOffset = firstPartOffset;
     private int _standardPartSize = standardPartSize;
@@ -24,6 +24,8 @@ public class NzbFileStream(
     private bool _disposed;
     private Stream? _innerStream;
     private CancellationToken _telemetryCancellationToken;
+
+    public FileAccessSession? FileAccessSession { get; set; }
 
     private bool HasSeekMap => _standardPartSize > 0 && fileSegmentIds.Length > 0;
 
@@ -124,7 +126,13 @@ public class NzbFileStream(
     private Stream GetMultiSegmentStream(int firstSegmentIndex, CancellationToken cancellationToken)
     {
         var segmentIds = fileSegmentIds.AsMemory()[firstSegmentIndex..];
-        return MultiSegmentStream.Create(segmentIds, usenetClient, articleBufferSize, cancellationToken, firstSegmentIndex);
+        return MultiSegmentStream.Create(
+            segmentIds,
+            usenetClient,
+            articleBufferSize,
+            cancellationToken,
+            firstSegmentIndex,
+            FileAccessSession);
     }
 
     protected override void Dispose(bool disposing)

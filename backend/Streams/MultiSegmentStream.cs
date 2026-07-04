@@ -25,13 +25,16 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
         INntpClient usenetClient,
         int articleBufferSize,
         CancellationToken cancellationToken,
-        int baseSegmentIndex = 0
+        int baseSegmentIndex = 0,
+        FileAccessSession? fileAccessSession = null
     )
     {
         return articleBufferSize == 0
-            ? new UnbufferedMultiSegmentStream(segmentIds, usenetClient, baseSegmentIndex)
-            : new MultiSegmentStream(segmentIds, usenetClient, articleBufferSize, cancellationToken, baseSegmentIndex);
+            ? new UnbufferedMultiSegmentStream(segmentIds, usenetClient, baseSegmentIndex, fileAccessSession)
+            : new MultiSegmentStream(segmentIds, usenetClient, articleBufferSize, cancellationToken, baseSegmentIndex, fileAccessSession);
     }
+
+    private readonly FileAccessSession? _fileAccessSession;
 
     private MultiSegmentStream
     (
@@ -39,12 +42,14 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
         INntpClient usenetClient,
         int articleBufferSize,
         CancellationToken cancellationToken,
-        int baseSegmentIndex
+        int baseSegmentIndex,
+        FileAccessSession? fileAccessSession
     )
     {
         _segmentIds = segmentIds;
         _usenetClient = usenetClient;
         _baseSegmentIndex = baseSegmentIndex;
+        _fileAccessSession = fileAccessSession;
         _streamTasks = Channel.CreateBounded<Task<Stream>>(articleBufferSize);
         _cts = ContextualCancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
     }
@@ -100,7 +105,8 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
             segmentId,
             segmentIndex,
             stopwatch.Elapsed,
-            cancellationToken);
+            cancellationToken,
+            _fileAccessSession);
     }
 
     public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)

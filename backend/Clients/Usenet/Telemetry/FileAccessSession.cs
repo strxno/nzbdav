@@ -19,6 +19,8 @@ public sealed class FileAccessSession : IDisposable
 
     private long _bytesDelivered;
     private long _segmentsCompleted;
+    private long _readAttempts;
+    private int _firstByteLogged;
     private long _lastProgressLogMs;
     private bool _completed;
 
@@ -120,6 +122,26 @@ public sealed class FileAccessSession : IDisposable
             elapsed.TotalMilliseconds);
     }
 
+    public void RecordReadAttempt()
+    {
+        Interlocked.Increment(ref _readAttempts);
+    }
+
+    public void RecordBytesDelivered(int bytes)
+    {
+        if (bytes <= 0) return;
+
+        Interlocked.Add(ref _bytesDelivered, bytes);
+
+        if (Interlocked.CompareExchange(ref _firstByteLogged, 1, 0) != 0) return;
+
+        FileAccessLog.Logger.Information(
+            "[FileAccess] First byte of {FileName} after {TtfbMs:F0}ms{Range}",
+            _fileName,
+            _stopwatch.Elapsed.TotalMilliseconds,
+            string.IsNullOrWhiteSpace(_rangeHeader) ? "" : $" range={_rangeHeader}");
+    }
+
     public void RecordSegmentSuccess(
         string providerHost,
         string? segmentId,
@@ -131,7 +153,6 @@ public sealed class FileAccessSession : IDisposable
         var stats = _providerStats.GetOrAdd(providerHost, static host => new ProviderSessionStats(host));
         stats.RecordSegmentSuccess(bytes, ttfb, transfer);
 
-        Interlocked.Add(ref _bytesDelivered, bytes);
         var segmentsCompleted = Interlocked.Increment(ref _segmentsCompleted);
 
         FileAccessLog.Logger.Debug(
@@ -157,11 +178,25 @@ public sealed class FileAccessSession : IDisposable
 
         if (_bytesDelivered == 0 && _segmentsCompleted == 0)
         {
-            FileAccessLog.Logger.Debug(
-                "[FileAccess] Closed {FileName} with no data read after {ElapsedMs:F0}ms{Range}",
-                _fileName,
-                _stopwatch.Elapsed.TotalMilliseconds,
-                string.IsNullOrWhiteSpace(_rangeHeader) ? "" : $" range={_rangeHeader}");
+            var readAttempts = Interlocked.Read(ref _readAttempts);
+            if (readAttempts > 0)
+            {
+                FileAccessLog.Logger.Debug(
+                    "[FileAccess] Closed {FileName} after {ElapsedMs:F0}ms waiting for Usenet data ({ReadAttempts} read attempts, 0 bytes delivered){Range}",
+                    _fileName,
+                    _stopwatch.Elapsed.TotalMilliseconds,
+                    readAttempts,
+                    string.IsNullOrWhiteSpace(_rangeHeader) ? "" : $" range={_rangeHeader}");
+            }
+            else
+            {
+                FileAccessLog.Logger.Debug(
+                    "[FileAccess] Closed {FileName} before any read after {ElapsedMs:F0}ms{Range}",
+                    _fileName,
+                    _stopwatch.Elapsed.TotalMilliseconds,
+                    string.IsNullOrWhiteSpace(_rangeHeader) ? "" : $" range={_rangeHeader}");
+            }
+
             return;
         }
 

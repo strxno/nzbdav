@@ -1,9 +1,11 @@
+using NzbWebDAV.Clients.Usenet.Telemetry;
+
 namespace NzbWebDAV.Streams;
 
-public sealed class FileAccessLoggingStream(Stream innerStream, IDisposable sessionScope) : Stream
+public sealed class FileAccessLoggingStream(Stream innerStream, FileAccessSession session) : Stream
 {
     private readonly Stream _innerStream = innerStream;
-    private readonly IDisposable _sessionScope = sessionScope;
+    private readonly FileAccessSession _session = session;
     private bool _disposed;
 
     public override bool CanRead => _innerStream.CanRead;
@@ -18,7 +20,13 @@ public sealed class FileAccessLoggingStream(Stream innerStream, IDisposable sess
 
     public override void Flush() => _innerStream.Flush();
 
-    public override int Read(byte[] buffer, int offset, int count) => _innerStream.Read(buffer, offset, count);
+    public override int Read(byte[] buffer, int offset, int count)
+    {
+        _session.RecordReadAttempt();
+        var read = _innerStream.Read(buffer, offset, count);
+        _session.RecordBytesDelivered(read);
+        return read;
+    }
 
     public override long Seek(long offset, SeekOrigin origin) => _innerStream.Seek(offset, origin);
 
@@ -26,11 +34,14 @@ public sealed class FileAccessLoggingStream(Stream innerStream, IDisposable sess
 
     public override void Write(byte[] buffer, int offset, int count) => _innerStream.Write(buffer, offset, count);
 
-    public override ValueTask<int> ReadAsync(
+    public override async ValueTask<int> ReadAsync(
         Memory<byte> buffer,
         CancellationToken cancellationToken = default)
     {
-        return _innerStream.ReadAsync(buffer, cancellationToken);
+        _session.RecordReadAttempt();
+        var read = await _innerStream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+        _session.RecordBytesDelivered(read);
+        return read;
     }
 
     protected override void Dispose(bool disposing)
@@ -39,7 +50,7 @@ public sealed class FileAccessLoggingStream(Stream innerStream, IDisposable sess
         if (disposing)
         {
             _innerStream.Dispose();
-            _sessionScope.Dispose();
+            _session.Complete();
         }
 
         _disposed = true;
@@ -50,7 +61,7 @@ public sealed class FileAccessLoggingStream(Stream innerStream, IDisposable sess
     {
         if (_disposed) return;
         await _innerStream.DisposeAsync().ConfigureAwait(false);
-        _sessionScope.Dispose();
+        _session.Complete();
         _disposed = true;
         await base.DisposeAsync().ConfigureAwait(false);
     }

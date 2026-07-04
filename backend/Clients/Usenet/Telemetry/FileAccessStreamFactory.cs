@@ -44,6 +44,6 @@ public static class FileAccessStreamFactory
             return Task.CompletedTask;
         });
 
-        return new FileAccessLoggingStream(inner, new FileAccessSessionScope(session));
+        return new FileAccessLoggingStream(inner, session);
     }
 }

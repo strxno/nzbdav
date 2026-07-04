@@ -72,6 +72,63 @@ function serializeProviderConfig(config: UsenetProviderConfig): string {
     return JSON.stringify(config);
 }
 
+type PersistedSpeedTestConfig = {
+    TestedAt?: string;
+    Results: Array<{
+        Host: string;
+        ProviderIndex: number;
+        Success: boolean;
+        Error?: string | null;
+        MegabitsPerSecond: number;
+        AverageTtfbMs: number;
+        InitialTtfbMs: number;
+        DurationSeconds: number;
+        SortRank: number;
+    }>;
+};
+
+function parseSpeedTestConfig(jsonString: string): Record<string, SpeedTestResult> {
+    try {
+        if (!jsonString || jsonString.trim() === "") return {};
+        const parsed = JSON.parse(jsonString) as PersistedSpeedTestConfig;
+        const results: Record<string, SpeedTestResult> = {};
+        for (const result of parsed.Results ?? []) {
+            results[result.Host.toLowerCase()] = {
+                providerIndex: result.ProviderIndex,
+                host: result.Host,
+                success: result.Success,
+                error: result.Error,
+                megabitsPerSecond: result.MegabitsPerSecond,
+                averageTtfbMs: result.AverageTtfbMs,
+                initialTtfbMs: result.InitialTtfbMs,
+                durationSeconds: result.DurationSeconds,
+                sortRank: result.SortRank,
+            };
+        }
+        return results;
+    } catch {
+        return {};
+    }
+}
+
+function serializeSpeedTestResults(results: Record<string, SpeedTestResult>): string {
+    const config: PersistedSpeedTestConfig = {
+        TestedAt: new Date().toISOString(),
+        Results: Object.values(results).map(result => ({
+            Host: result.host,
+            ProviderIndex: result.providerIndex,
+            Success: result.success,
+            Error: result.error,
+            MegabitsPerSecond: result.megabitsPerSecond,
+            AverageTtfbMs: result.averageTtfbMs,
+            InitialTtfbMs: result.initialTtfbMs,
+            DurationSeconds: result.durationSeconds,
+            SortRank: result.sortRank,
+        })),
+    };
+    return JSON.stringify(config);
+}
+
 export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
     // state
     const [showModal, setShowModal] = useState(false);
@@ -82,6 +139,14 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
     const [speedTestResults, setSpeedTestResults] = useState<Record<string, SpeedTestResult>>({});
     const [speedTestError, setSpeedTestError] = useState<string | null>(null);
     const providerConfig = useMemo(() => parseProviderConfig(config["usenet.providers"]), [config]);
+    const persistedSpeedTests = useMemo(
+        () => parseSpeedTestConfig(config["usenet.provider-speed-tests"]),
+        [config]
+    );
+
+    useEffect(() => {
+        setSpeedTestResults(persistedSpeedTests);
+    }, [persistedSpeedTests]);
 
     // handlers
     const handleAddProvider = useCallback(() => {
@@ -171,13 +236,17 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                 };
             }
             setSpeedTestResults(results);
+            setNewConfig(prev => ({
+                ...prev,
+                "usenet.provider-speed-tests": serializeSpeedTestResults(results),
+            }));
         } catch (error) {
             setSpeedTestError("Network error: " + (error instanceof Error ? error.message : "Unknown error"));
         } finally {
             setIsSpeedTesting(false);
             setSpeedTestProgress(null);
         }
-    }, []);
+    }, [setNewConfig]);
 
     // effects
     useEffect(() => {

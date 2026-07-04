@@ -27,6 +27,7 @@ const defaultConfig = {
     "api.completed-downloads-dir": "",
     "api.user-agent": "",
     "usenet.providers": "",
+    "usenet.provider-speed-tests": "",
     "usenet.max-download-connections": "15",
     "usenet.streaming-priority": "80",
     "usenet.article-buffer-size": "40",

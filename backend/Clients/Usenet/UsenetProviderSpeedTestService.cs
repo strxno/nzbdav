@@ -14,6 +14,7 @@ namespace NzbWebDAV.Clients.Usenet;
 public sealed class UsenetProviderSpeedTestService(
     ConfigManager configManager,
     ProviderPerformanceStore performanceStore,
+    ProviderSpeedTestPersistence speedTestPersistence,
     WebsocketManager websocketManager)
 {
     private const long TargetBytes = 500L * 1024 * 1024;
@@ -87,10 +88,16 @@ public sealed class UsenetProviderSpeedTestService(
                 .GetRankings(providerConfig.Providers.Select(x => x.Host))
                 .ToDictionary(x => x.Host, x => x.Rank, StringComparer.OrdinalIgnoreCase);
 
-            return results
+            var rankedResults = results
                 .Select(x => x with { SortRank = rankedHosts.GetValueOrDefault(x.Host) })
                 .OrderBy(x => x.SortRank == 0 ? int.MaxValue : x.SortRank)
                 .ToList();
+
+            await speedTestPersistence
+                .SaveAsync(rankedResults, cancellationToken)
+                .ConfigureAwait(false);
+
+            return rankedResults;
         }
         finally
         {

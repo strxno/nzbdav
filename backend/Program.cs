@@ -86,6 +86,10 @@ class Program
         var configManager = new ConfigManager();
         await configManager.LoadConfig().ConfigureAwait(false);
 
+        var performanceStore = new ProviderPerformanceStore();
+        var speedTestPersistence = new ProviderSpeedTestPersistence(configManager);
+        speedTestPersistence.LoadIntoStore(performanceStore);
+
         // initialize rclone client
         RcloneClient.Initialize(configManager);
 
@@ -103,7 +107,10 @@ class Program
             .AddWebdavBasicAuthentication(configManager)
             .AddSingleton(configManager)
             .AddSingleton(websocketManager)
-            .AddSingleton<ProviderPerformanceStore>()
+            .AddSingleton(performanceStore)
+            .AddSingleton(speedTestPersistence)
+            .AddSingleton<ProviderPerformanceStore>(performanceStore)
+            .AddSingleton<ProviderSpeedTestPersistence>(speedTestPersistence)
             .AddSingleton<UsenetProviderSpeedTestService>()
             .AddSingleton<UsenetStreamingClient>()
             .AddSingleton<QueueManager>()

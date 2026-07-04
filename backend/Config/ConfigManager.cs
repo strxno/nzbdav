@@ -207,6 +207,12 @@ public class ConfigManager
         return GetConfigValue<UsenetProviderConfig>("usenet.providers") ?? defaultValue;
     }
 
+    public UsenetProviderSpeedTestConfig GetProviderSpeedTestConfig()
+    {
+        return GetConfigValue<UsenetProviderSpeedTestConfig>(UsenetProviderSpeedTestConfig.ConfigKey)
+            ?? new UsenetProviderSpeedTestConfig();
+    }
+
     public string GetDuplicateNzbBehavior()
     {
         var defaultValue = "increment";

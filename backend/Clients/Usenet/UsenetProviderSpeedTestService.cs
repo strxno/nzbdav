@@ -17,6 +17,7 @@ public sealed class UsenetProviderSpeedTestService(
     WebsocketManager websocketManager)
 {
     private const long TargetBytes = 500L * 1024 * 1024;
+    private const int TtfbSampleCount = 10;
     private const string SpeedTestNzbResourceName = "NzbWebDAV.Resources.NZBGet-Speed-Test-500MB.nzb";
 
     private readonly SemaphoreSlim _runLock = new(1, 1);
@@ -70,6 +71,7 @@ public sealed class UsenetProviderSpeedTestService(
                 performanceStore.SetSpeedTestResult(
                     provider.Host,
                     result.MegabitsPerSecond,
+                    result.AverageTtfbMs,
                     result.Success);
 
                 await SendProgressAsync(
@@ -109,12 +111,17 @@ public sealed class UsenetProviderSpeedTestService(
     {
         var stopwatch = Stopwatch.StartNew();
         long bytesDownloaded = 0;
+        double averageTtfbMs = 0;
+        double initialTtfbMs = 0;
 
         using var client = CreateSingleProviderClient(provider);
         var concurrency = Math.Max(1, provider.MaxConnections);
 
         try
         {
+            (averageTtfbMs, initialTtfbMs) = await MeasureTtfbAsync(client, segments, cancellationToken)
+                .ConfigureAwait(false);
+
             var tasks = segments.Select(async segment =>
             {
                 cancellationToken.ThrowIfCancellationRequested();
@@ -155,16 +162,20 @@ public sealed class UsenetProviderSpeedTestService(
                 Error = e.Message,
                 BytesDownloaded = bytesDownloaded,
                 DurationSeconds = stopwatch.Elapsed.TotalSeconds,
-                MegabitsPerSecond = CalculateMegabitsPerSecond(bytesDownloaded, stopwatch.Elapsed)
+                MegabitsPerSecond = CalculateMegabitsPerSecond(bytesDownloaded, stopwatch.Elapsed),
+                AverageTtfbMs = averageTtfbMs,
+                InitialTtfbMs = initialTtfbMs
             };
         }
 
         stopwatch.Stop();
         var megabitsPerSecond = CalculateMegabitsPerSecond(bytesDownloaded, stopwatch.Elapsed);
         Log.Information(
-            "Provider speed test {Host}: {MegabitsPerSecond:F1} Mbit/s ({Megabytes:F1} MB in {Seconds:F1}s)",
+            "Provider speed test {Host}: {MegabitsPerSecond:F1} Mbit/s, {AverageTtfbMs:F0}ms avg ttfb ({InitialTtfbMs:F0}ms first byte) ({Megabytes:F1} MB in {Seconds:F1}s)",
             provider.Host,
             megabitsPerSecond,
+            averageTtfbMs,
+            initialTtfbMs,
             bytesDownloaded / 1024d / 1024d,
             stopwatch.Elapsed.TotalSeconds);
 
@@ -175,8 +186,74 @@ public sealed class UsenetProviderSpeedTestService(
             Success = bytesDownloaded > 0,
             BytesDownloaded = bytesDownloaded,
             DurationSeconds = stopwatch.Elapsed.TotalSeconds,
-            MegabitsPerSecond = megabitsPerSecond
+            MegabitsPerSecond = megabitsPerSecond,
+            AverageTtfbMs = averageTtfbMs,
+            InitialTtfbMs = initialTtfbMs
         };
+    }
+
+    private static async Task<(double AverageTtfbMs, double InitialTtfbMs)> MeasureTtfbAsync
+    (
+        MultiConnectionNntpClient client,
+        IReadOnlyList<SpeedTestSegment> segments,
+        CancellationToken cancellationToken
+    )
+    {
+        if (segments.Count == 0) return (0, 0);
+
+        var sampleIndices = Enumerable.Range(0, TtfbSampleCount)
+            .Select(i => i * Math.Max(1, segments.Count - 1) / Math.Max(1, TtfbSampleCount - 1))
+            .Distinct()
+            .ToList();
+
+        var samples = new List<double>(sampleIndices.Count);
+        double initialTtfbMs = 0;
+
+        foreach (var index in sampleIndices)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var segment = segments[Math.Min(index, segments.Count - 1)];
+            var ttfbMs = await MeasureSegmentTtfbAsync(client, segment.MessageId, cancellationToken)
+                .ConfigureAwait(false);
+            if (samples.Count == 0) initialTtfbMs = ttfbMs;
+            samples.Add(ttfbMs);
+        }
+
+        samples.Sort();
+        var medianIndex = samples.Count / 2;
+        var averageTtfbMs = samples.Count % 2 == 0
+            ? (samples[medianIndex - 1] + samples[medianIndex]) / 2d
+            : samples[medianIndex];
+
+        return (averageTtfbMs, initialTtfbMs);
+    }
+
+    private static async Task<double> MeasureSegmentTtfbAsync
+    (
+        MultiConnectionNntpClient client,
+        string messageId,
+        CancellationToken cancellationToken
+    )
+    {
+        var stopwatch = Stopwatch.StartNew();
+        var response = await client.DecodedBodyAsync(messageId, cancellationToken).ConfigureAwait(false);
+        await using var stream = response.Stream;
+
+        var buffer = new byte[4096];
+        while (true)
+        {
+            var read = await stream.ReadAsync(buffer, cancellationToken).ConfigureAwait(false);
+            if (read > 0)
+            {
+                stopwatch.Stop();
+                return stopwatch.Elapsed.TotalMilliseconds;
+            }
+
+            if (read == 0) break;
+        }
+
+        stopwatch.Stop();
+        return stopwatch.Elapsed.TotalMilliseconds;
     }
 
     private static MultiConnectionNntpClient CreateSingleProviderClient(UsenetProviderConfig.ConnectionDetails provider)
@@ -254,5 +331,7 @@ public sealed record ProviderSpeedTestResult
     public long BytesDownloaded { get; init; }
     public double DurationSeconds { get; init; }
     public double MegabitsPerSecond { get; init; }
+    public double AverageTtfbMs { get; init; }
+    public double InitialTtfbMs { get; init; }
     public int SortRank { get; init; }
 }

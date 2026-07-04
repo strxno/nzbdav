@@ -14,5 +14,7 @@ public sealed class ProviderSpeedTestResultDto
     public long BytesDownloaded { get; set; }
     public double DurationSeconds { get; set; }
     public double MegabitsPerSecond { get; set; }
+    public double AverageTtfbMs { get; set; }
+    public double InitialTtfbMs { get; set; }
     public int SortRank { get; set; }
 }

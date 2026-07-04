@@ -111,6 +111,10 @@ public sealed class FileAccessSession : IDisposable
                 break;
         }
 
+        // Successful attempts are only counted for the end-of-file summary.
+        // Individual failures/missing/timeouts are worth surfacing at the moment they happen.
+        if (outcome == ProviderAttemptOutcome.Success) return;
+
         var detailSuffix = string.IsNullOrWhiteSpace(detail) ? "" : $" ({detail})";
         FileAccessLog.Logger.Information(
             "[FileAccess] {FileName} provider {Provider} {Operation} on {SegmentId}: {Outcome} in {ElapsedMs:F0}ms{Detail}",
@@ -191,18 +195,8 @@ public sealed class FileAccessSession : IDisposable
 
         var segmentsCompleted = Interlocked.Increment(ref _segmentsCompleted);
 
-        FileAccessLog.Logger.Debug(
-            "[FileAccess] {FileName} segment {SegmentIndex} from {Provider} ({SegmentId}): {Bytes} bytes, " +
-            "ttfb {TtfbMs:F0}ms, transfer {TransferMs:F0}ms, {ThroughputMbps:F2} Mbit/s",
-            _fileName,
-            segmentIndex,
-            providerHost,
-            FormatSegmentId(segmentId),
-            bytes,
-            ttfb.TotalMilliseconds,
-            transfer.TotalMilliseconds,
-            transfer.TotalSeconds > 0 ? bytes * 8.0 / (transfer.TotalSeconds * 1_000_000) : 0);
-
+        // Per-segment details are aggregated into the periodic progress and end-of-file summaries
+        // instead of being logged individually.
         MaybeLogProgress(segmentsCompleted);
     }
 

@@ -12,6 +12,8 @@ type SpeedTestResult = {
     success: boolean;
     error?: string | null;
     megabitsPerSecond: number;
+    averageTtfbMs: number;
+    initialTtfbMs: number;
     durationSeconds: number;
     sortRank: number;
 };
@@ -162,6 +164,8 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                     success: result.success,
                     error: result.error,
                     megabitsPerSecond: result.megabitsPerSecond,
+                    averageTtfbMs: result.averageTtfbMs,
+                    initialTtfbMs: result.initialTtfbMs,
                     durationSeconds: result.durationSeconds,
                     sortRank: result.sortRank,
                 };
@@ -362,7 +366,7 @@ export function UsenetSettings({ config, setNewConfig }: UsenetSettingsProps) {
                                                     <span className={styles["provider-detail-label"]}>Speed Test</span>
                                                     <span className={styles["provider-detail-value"]}>
                                                         {speedResult?.success
-                                                            ? `#${speedResult.sortRank} · ${speedResult.megabitsPerSecond.toFixed(1)} Mbit/s`
+                                                            ? `#${speedResult.sortRank} · ${speedResult.megabitsPerSecond.toFixed(1)} Mbit/s · ${speedResult.averageTtfbMs.toFixed(0)}ms ttfb`
                                                             : speedResult?.error
                                                                 ? "Failed"
                                                                 : "Not tested"}

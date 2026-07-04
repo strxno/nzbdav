@@ -11,7 +11,7 @@ public sealed class ProviderPerformanceStore
     private const double ResponseEmaAlpha = 0.15;
 
     private readonly ConcurrentDictionary<string, ProviderPerformanceEntry> _entries = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, double> _speedTestMegabitsPerSecond = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, SpeedTestMetrics> _speedTestMetrics = new(StringComparer.OrdinalIgnoreCase);
 
     public void RecordAttempt(string providerHost, ProviderAttemptOutcome outcome, TimeSpan elapsed)
     {
@@ -21,38 +21,42 @@ public sealed class ProviderPerformanceStore
             .Record(outcome, elapsed.TotalMilliseconds);
     }
 
-    public void SetSpeedTestResult(string providerHost, double megabitsPerSecond, bool success)
+    public void SetSpeedTestResult(string providerHost, double megabitsPerSecond, double averageTtfbMs, bool success)
     {
         if (string.IsNullOrWhiteSpace(providerHost)) return;
 
         if (success && megabitsPerSecond > 0)
         {
-            _speedTestMegabitsPerSecond[providerHost] = megabitsPerSecond;
+            _speedTestMetrics[providerHost] = new SpeedTestMetrics(megabitsPerSecond, averageTtfbMs);
             _entries.GetOrAdd(providerHost, static _ => new ProviderPerformanceEntry())
-                .ApplySpeedTestBaseline(megabitsPerSecond);
+                .ApplySpeedTestBaseline(megabitsPerSecond, averageTtfbMs);
             return;
         }
 
-        _speedTestMegabitsPerSecond.TryRemove(providerHost, out _);
+        _speedTestMetrics.TryRemove(providerHost, out _);
         RecordAttempt(providerHost, ProviderAttemptOutcome.Failed, TimeSpan.FromSeconds(30));
     }
 
     public double? GetSpeedTestMegabitsPerSecond(string providerHost)
     {
         if (string.IsNullOrWhiteSpace(providerHost)) return null;
-        return _speedTestMegabitsPerSecond.TryGetValue(providerHost, out var mbps) ? mbps : null;
+        return _speedTestMetrics.TryGetValue(providerHost, out var metrics) ? metrics.MegabitsPerSecond : null;
+    }
+
+    public double? GetSpeedTestAverageTtfbMs(string providerHost)
+    {
+        if (string.IsNullOrWhiteSpace(providerHost)) return null;
+        return _speedTestMetrics.TryGetValue(providerHost, out var metrics) ? metrics.AverageTtfbMs : null;
     }
 
     public double GetSortScore(string providerHost)
     {
         if (string.IsNullOrWhiteSpace(providerHost)) return double.MinValue;
 
-        var speedTestBonus = _speedTestMegabitsPerSecond.TryGetValue(providerHost, out var mbps)
-            ? mbps * 10_000
-            : 0;
+        if (_speedTestMetrics.TryGetValue(providerHost, out var metrics))
+            return CalculateSpeedTestSortScore(metrics.MegabitsPerSecond, metrics.AverageTtfbMs);
 
-        var runtimeScore = _entries.TryGetValue(providerHost, out var entry) ? entry.GetSortScore() : 0;
-        return speedTestBonus + runtimeScore;
+        return _entries.TryGetValue(providerHost, out var entry) ? entry.GetSortScore() : 0;
     }
 
     public IReadOnlyList<ProviderPerformanceRanking> GetRankings(IEnumerable<string> providerHosts)
@@ -62,11 +66,20 @@ public sealed class ProviderPerformanceStore
             .Select(host => new ProviderPerformanceRanking(
                 host,
                 GetSortScore(host),
-                GetSpeedTestMegabitsPerSecond(host)))
+                GetSpeedTestMegabitsPerSecond(host),
+                GetSpeedTestAverageTtfbMs(host)))
             .OrderByDescending(x => x.SortScore)
             .Select((ranking, index) => ranking with { Rank = index + 1 })
             .ToList();
     }
+
+    private static double CalculateSpeedTestSortScore(double megabitsPerSecond, double averageTtfbMs)
+    {
+        var ttfbMs = Math.Max(50, averageTtfbMs);
+        return megabitsPerSecond * 10_000 / ttfbMs;
+    }
+
+    private sealed record SpeedTestMetrics(double MegabitsPerSecond, double AverageTtfbMs);
 
     private sealed class ProviderPerformanceEntry
     {
@@ -98,7 +111,7 @@ public sealed class ProviderPerformanceStore
             UpdateResponseEma(elapsedMs);
         }
 
-        public void ApplySpeedTestBaseline(double megabitsPerSecond)
+        public void ApplySpeedTestBaseline(double megabitsPerSecond, double averageTtfbMs)
         {
             lock (_emaLock)
             {
@@ -106,7 +119,7 @@ public sealed class ProviderPerformanceStore
                 _missingArticles = 0;
                 _failures = 0;
                 _timeouts = 0;
-                _emaResponseMs = Math.Max(50, 700_000 * 8 / Math.Max(1, megabitsPerSecond));
+                _emaResponseMs = Math.Max(50, averageTtfbMs);
             }
         }
 
@@ -148,4 +161,5 @@ public sealed record ProviderPerformanceRanking(
     string Host,
     double SortScore,
     double? SpeedTestMegabitsPerSecond,
+    double? SpeedTestAverageTtfbMs,
     int Rank = 0);

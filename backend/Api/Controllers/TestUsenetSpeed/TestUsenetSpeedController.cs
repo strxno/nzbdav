@@ -34,6 +34,8 @@ public class TestUsenetSpeedController(UsenetProviderSpeedTestService speedTestS
                 BytesDownloaded = x.BytesDownloaded,
                 DurationSeconds = x.DurationSeconds,
                 MegabitsPerSecond = x.MegabitsPerSecond,
+                AverageTtfbMs = x.AverageTtfbMs,
+                InitialTtfbMs = x.InitialTtfbMs,
                 SortRank = x.SortRank
             }).ToList()
         });

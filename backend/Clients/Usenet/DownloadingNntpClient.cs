@@ -1,6 +1,7 @@
 ﻿using NzbWebDAV.Clients.Usenet.Concurrency;
 using NzbWebDAV.Clients.Usenet.Contexts;
 using NzbWebDAV.Clients.Usenet.Models;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Config;
 using NzbWebDAV.Extensions;
 using UsenetSharp.Models;
@@ -116,6 +117,59 @@ public class DownloadingNntpClient : WrappingNntpClient
     {
         var onConnectionReadyAgain = exclusiveConnection.OnConnectionReadyAgain;
         return base.DecodedBodyAsync(segmentId, onConnectionReadyAgain, cancellationToken);
+    }
+
+    public override async Task<UsenetProviderBodyResponse> DecodedBodyFromProviderAsync(
+        SegmentId segmentId,
+        CancellationToken cancellationToken,
+        FileAccessSession? telemetrySession = null)
+    {
+        await AcquireExclusiveConnectionAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            return await InvokeProviderBodyAsync(
+                segmentId,
+                _ => _semaphore.Release(),
+                cancellationToken,
+                telemetrySession).ConfigureAwait(false);
+        }
+        catch
+        {
+            _semaphore.Release();
+            throw;
+        }
+    }
+
+    public override Task<UsenetProviderBodyResponse> DecodedBodyFromProviderAsync(
+        SegmentId segmentId,
+        UsenetExclusiveConnection exclusiveConnection,
+        CancellationToken cancellationToken,
+        FileAccessSession? telemetrySession = null)
+    {
+        return InvokeProviderBodyAsync(
+            segmentId,
+            exclusiveConnection.OnConnectionReadyAgain,
+            cancellationToken,
+            telemetrySession);
+    }
+
+    private async Task<UsenetProviderBodyResponse> InvokeProviderBodyAsync(
+        SegmentId segmentId,
+        Action<ArticleBodyResult>? onConnectionReadyAgain,
+        CancellationToken cancellationToken,
+        FileAccessSession? telemetrySession)
+    {
+        if (UnderlyingClient is MultiProviderNntpClient multiProvider)
+        {
+            return await multiProvider.DecodedBodyFromProviderAsync(
+                segmentId,
+                onConnectionReadyAgain,
+                cancellationToken,
+                telemetrySession).ConfigureAwait(false);
+        }
+
+        var response = await DecodedBodyAsync(segmentId, onConnectionReadyAgain, cancellationToken).ConfigureAwait(false);
+        return new UsenetProviderBodyResponse(response, "unknown");
     }
 
     public override Task<UsenetDecodedArticleResponse> DecodedArticleAsync(SegmentId segmentId,

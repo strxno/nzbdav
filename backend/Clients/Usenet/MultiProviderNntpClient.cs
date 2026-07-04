@@ -78,32 +78,12 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
         CancellationToken cancellationToken
     )
     {
-        UsenetDecodedBodyResponse? result;
-        try
-        {
-            result = await RunFromPoolWithBackup(
-                x => x.DecodedBodyAsync(segmentId, OnConnectionReadyAgain, cancellationToken),
-                cancellationToken,
-                "BODY",
-                segmentId
-            ).ConfigureAwait(false);
-        }
-        catch
-        {
-            onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved);
-            throw;
-        }
-
-        if (result.ResponseType != UsenetResponseType.ArticleRetrievedBodyFollows)
-            onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved);
-
-        return result;
-
-        void OnConnectionReadyAgain(ArticleBodyResult articleBodyResult)
-        {
-            if (articleBodyResult == ArticleBodyResult.Retrieved)
-                onConnectionReadyAgain?.Invoke(ArticleBodyResult.Retrieved);
-        }
+        var providerBody = await DecodedBodyFromProviderAsync(
+            segmentId,
+            onConnectionReadyAgain,
+            cancellationToken,
+            telemetrySession: null).ConfigureAwait(false);
+        return providerBody.Response;
     }
 
     public override async Task<UsenetDecodedArticleResponse> DecodedArticleAsync
@@ -141,6 +121,51 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
         }
     }
 
+    public override Task<UsenetProviderBodyResponse> DecodedBodyFromProviderAsync
+    (
+        SegmentId segmentId,
+        CancellationToken cancellationToken,
+        FileAccessSession? telemetrySession = null
+    )
+    {
+        return DecodedBodyFromProviderAsync(segmentId, onConnectionReadyAgain: null, cancellationToken, telemetrySession);
+    }
+
+    public async Task<UsenetProviderBodyResponse> DecodedBodyFromProviderAsync
+    (
+        SegmentId segmentId,
+        Action<ArticleBodyResult>? onConnectionReadyAgain,
+        CancellationToken cancellationToken,
+        FileAccessSession? telemetrySession = null
+    )
+    {
+        try
+        {
+            var (result, providerHost) = await RunFromPoolWithProviderAsync(
+                x => x.DecodedBodyAsync(segmentId, OnConnectionReadyAgain, cancellationToken),
+                cancellationToken,
+                telemetrySession,
+                "BODY",
+                segmentId).ConfigureAwait(false);
+
+            if (result.ResponseType != UsenetResponseType.ArticleRetrievedBodyFollows)
+                onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved);
+
+            return new UsenetProviderBodyResponse(result, providerHost);
+        }
+        catch
+        {
+            onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved);
+            throw;
+        }
+
+        void OnConnectionReadyAgain(ArticleBodyResult articleBodyResult)
+        {
+            if (articleBodyResult == ArticleBodyResult.Retrieved)
+                onConnectionReadyAgain?.Invoke(ArticleBodyResult.Retrieved);
+        }
+    }
+
     private async Task<T> RunFromPoolWithBackup<T>
     (
         Func<INntpClient, Task<T>> task,
@@ -149,6 +174,25 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
         string? segmentId = null
     ) where T : UsenetResponse
     {
+        var (result, _) = await RunFromPoolWithProviderAsync(
+            task,
+            cancellationToken,
+            telemetrySession: null,
+            operation,
+            segmentId).ConfigureAwait(false);
+        return result;
+    }
+
+    private async Task<(T Result, string ProviderHost)> RunFromPoolWithProviderAsync<T>
+    (
+        Func<INntpClient, Task<T>> task,
+        CancellationToken cancellationToken,
+        FileAccessSession? telemetrySession,
+        string operation,
+        string? segmentId = null
+    ) where T : UsenetResponse
+    {
+        telemetrySession ??= FileAccessTelemetry.ResolveSession(cancellationToken);
         ExceptionDispatchInfo? lastException = null;
         var orderedProviders = GetOrderedProviders();
         for (var i = 0; i < orderedProviders.Count; i++)
@@ -158,26 +202,6 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
             var isLastProvider = i == orderedProviders.Count - 1;
             var stopwatch = Stopwatch.StartNew();
 
-            if (lastException is not null)
-            {
-                var msg = lastException.SourceException.Message;
-                if (FileAccessTelemetry.ResolveSession(cancellationToken) is not null)
-                {
-                    FileAccessLog.Logger.Information(
-                        "Provider {Provider} failed for {Operation} on {SegmentId}, trying next provider: {Message}",
-                        provider.ProviderHost,
-                        operation,
-                        FormatSegmentId(segmentId),
-                        msg);
-                }
-                else
-                {
-                    Log.Debug(
-                        "Encountered error during NNTP Operation: `{Message}`. Trying another provider.",
-                        msg);
-                }
-            }
-
             try
             {
                 var result = await task.Invoke(provider).ConfigureAwait(false);
@@ -185,40 +209,54 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
 
                 if (!isLastProvider && result.ResponseType == UsenetResponseType.NoArticleWithThatMessageId)
                 {
-                    FileAccessTelemetry.RecordProviderMissingArticle(
-                        cancellationToken,
+                    telemetrySession?.RecordProviderAttempt(
                         provider.ProviderHost,
                         operation,
                         segmentId,
-                        stopwatch.Elapsed);
+                        stopwatch.Elapsed,
+                        ProviderAttemptOutcome.MissingArticle);
                     continue;
                 }
 
-                ProviderSelectionContext.LastProviderHost = provider.ProviderHost;
+                telemetrySession?.RecordProviderAttempt(
+                    provider.ProviderHost,
+                    operation,
+                    segmentId,
+                    stopwatch.Elapsed,
+                    ProviderAttemptOutcome.Success);
 
-                if (lastException is not null && FileAccessTelemetry.ResolveSession(cancellationToken) is not null)
+                if (lastException is not null && telemetrySession is not null)
                 {
                     FileAccessLog.Logger.Information(
-                        "{Operation} on {SegmentId} succeeded on provider {Provider} after failover in {ElapsedMs:F0}ms",
+                        "[FileAccess] {Operation} on {SegmentId} succeeded on provider {Provider} after failover in {ElapsedMs:F0}ms",
                         operation,
                         FormatSegmentId(segmentId),
                         provider.ProviderHost,
                         stopwatch.Elapsed.TotalMilliseconds);
                 }
 
-                return result;
+                return (result, provider.ProviderHost);
             }
             catch (Exception e) when (!e.IsCancellationException())
             {
                 stopwatch.Stop();
                 var failure = ProviderFailureClassifier.Classify(e, operation);
-                FileAccessTelemetry.RecordProviderAttemptFailure(
-                    cancellationToken,
-                    provider.ProviderHost,
-                    operation,
-                    segmentId,
-                    failure,
-                    stopwatch.Elapsed);
+                if (telemetrySession is not null)
+                {
+                    telemetrySession.RecordProviderAttemptFailure(
+                        provider.ProviderHost,
+                        operation,
+                        segmentId,
+                        failure,
+                        stopwatch.Elapsed);
+                }
+                else
+                {
+                    Log.Debug(
+                        "Encountered error during NNTP Operation: `{Message}`. Trying another provider.",
+                        failure.Summary);
+                }
+
                 lastException = ExceptionDispatchInfo.Capture(e);
             }
         }
@@ -237,7 +275,6 @@ public class MultiProviderNntpClient(List<MultiConnectionNntpClient> providers) 
 
         var healthy = enabled.Where(x => !x.IsTripped).ToList();
 
-        // Always return at least one provider so cooldown probes can fire.
         return healthy.Count > 0 ? healthy : enabled;
     }
 

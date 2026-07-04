@@ -1,10 +1,13 @@
 ﻿using NzbWebDAV.Clients.Usenet.Models;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using UsenetSharp.Models;
 
 namespace NzbWebDAV.Clients.Usenet;
 
 public class WrappingNntpClient(INntpClient usenetClient) : NntpClient
 {
+    protected INntpClient UnderlyingClient => _usenetClient;
+
     private INntpClient _usenetClient = usenetClient;
 
     public override Task ConnectAsync(
@@ -50,6 +53,17 @@ public class WrappingNntpClient(INntpClient usenetClient) : NntpClient
     public override Task<UsenetDecodedBodyResponse> DecodedBodyAsync(
         SegmentId segmentId, UsenetExclusiveConnection exclusiveConnection, CancellationToken cancellationToken) =>
         _usenetClient.DecodedBodyAsync(segmentId, exclusiveConnection, cancellationToken);
+
+    public override Task<UsenetProviderBodyResponse> DecodedBodyFromProviderAsync(
+        SegmentId segmentId, CancellationToken cancellationToken, FileAccessSession? telemetrySession = null) =>
+        _usenetClient.DecodedBodyFromProviderAsync(segmentId, cancellationToken, telemetrySession);
+
+    public override Task<UsenetProviderBodyResponse> DecodedBodyFromProviderAsync(
+        SegmentId segmentId,
+        UsenetExclusiveConnection exclusiveConnection,
+        CancellationToken cancellationToken,
+        FileAccessSession? telemetrySession = null) =>
+        _usenetClient.DecodedBodyFromProviderAsync(segmentId, exclusiveConnection, cancellationToken, telemetrySession);
 
     public override Task<UsenetDecodedArticleResponse> DecodedArticleAsync(
         SegmentId segmentId, UsenetExclusiveConnection exclusiveConnection, CancellationToken cancellationToken) =>

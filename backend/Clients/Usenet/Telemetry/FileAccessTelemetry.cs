@@ -45,14 +45,12 @@ public static class FileAccessTelemetry
 
     public static Stream WrapSegmentStream(
         Stream inner,
+        string providerHost,
         string segmentId,
         int segmentIndex,
         TimeSpan ttfb,
-        CancellationToken cancellationToken,
-        FileAccessSession? session = null)
+        FileAccessSession? session)
     {
-        var providerHost = ProviderSelectionContext.LastProviderHost ?? "unknown";
-        session ??= ResolveSession(cancellationToken);
         return new InstrumentedSegmentStream(
             inner, providerHost, segmentId, segmentIndex, ttfb, session);
     }

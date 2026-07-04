@@ -84,6 +84,45 @@ public sealed class FileAccessSession : IDisposable
             standardPartSize);
     }
 
+    public void RecordProviderAttempt(
+        string providerHost,
+        string operation,
+        string? segmentId,
+        TimeSpan elapsed,
+        ProviderAttemptOutcome outcome,
+        string? detail = null)
+    {
+        var stats = _providerStats.GetOrAdd(providerHost, static host => new ProviderSessionStats(host));
+        stats.RecordAttemptResponseTime(elapsed);
+
+        switch (outcome)
+        {
+            case ProviderAttemptOutcome.Success:
+                stats.RecordSuccessfulAttempt(elapsed);
+                break;
+            case ProviderAttemptOutcome.MissingArticle:
+                stats.RecordAttemptFailure(missingArticle: true, timeout: false);
+                break;
+            case ProviderAttemptOutcome.Timeout:
+                stats.RecordAttemptFailure(missingArticle: false, timeout: true);
+                break;
+            case ProviderAttemptOutcome.Failed:
+                stats.RecordAttemptFailure(missingArticle: false, timeout: false);
+                break;
+        }
+
+        var detailSuffix = string.IsNullOrWhiteSpace(detail) ? "" : $" ({detail})";
+        FileAccessLog.Logger.Information(
+            "[FileAccess] {FileName} provider {Provider} {Operation} on {SegmentId}: {Outcome} in {ElapsedMs:F0}ms{Detail}",
+            _fileName,
+            providerHost,
+            operation,
+            FormatSegmentId(segmentId),
+            outcome,
+            elapsed.TotalMilliseconds,
+            detailSuffix);
+    }
+
     public void RecordProviderAttemptFailure(
         string providerHost,
         string operation,
@@ -91,35 +130,30 @@ public sealed class FileAccessSession : IDisposable
         ProviderFailureInfo failure,
         TimeSpan elapsed)
     {
-        var stats = _providerStats.GetOrAdd(providerHost, static host => new ProviderSessionStats(host));
-        stats.RecordAttemptFailure(
-            missingArticle: failure.Category == ProviderFailureCategory.MissingArticle,
-            timeout: failure.Category == ProviderFailureCategory.Timeout);
+        var outcome = failure.Category switch
+        {
+            ProviderFailureCategory.MissingArticle => ProviderAttemptOutcome.MissingArticle,
+            ProviderFailureCategory.Timeout => ProviderAttemptOutcome.Timeout,
+            _ => ProviderAttemptOutcome.Failed
+        };
 
-        FileAccessLog.Logger.Information(
-            "[FileAccess] {FileName} provider {Provider} failed {Operation} on {SegmentId} after {ElapsedMs:F0}ms " +
-            "({Category}: {Summary})",
-            _fileName,
+        RecordProviderAttempt(
             providerHost,
             operation,
-            FormatSegmentId(segmentId),
-            elapsed.TotalMilliseconds,
-            failure.Category,
-            failure.Summary);
+            segmentId,
+            elapsed,
+            outcome,
+            $"{failure.Category}: {failure.Summary}");
     }
 
     public void RecordProviderMissingArticle(string providerHost, string operation, string? segmentId, TimeSpan elapsed)
     {
-        var stats = _providerStats.GetOrAdd(providerHost, static host => new ProviderSessionStats(host));
-        stats.RecordAttemptFailure(missingArticle: true, timeout: false);
-
-        FileAccessLog.Logger.Information(
-            "[FileAccess] {FileName} provider {Provider} missing article for {Operation} on {SegmentId} after {ElapsedMs:F0}ms",
-            _fileName,
+        RecordProviderAttempt(
             providerHost,
             operation,
-            FormatSegmentId(segmentId),
-            elapsed.TotalMilliseconds);
+            segmentId,
+            elapsed,
+            ProviderAttemptOutcome.MissingArticle);
     }
 
     public void RecordReadAttempt()
@@ -150,6 +184,8 @@ public sealed class FileAccessSession : IDisposable
         TimeSpan ttfb,
         TimeSpan transfer)
     {
+        if (bytes <= 0) return;
+
         var stats = _providerStats.GetOrAdd(providerHost, static host => new ProviderSessionStats(host));
         stats.RecordSegmentSuccess(bytes, ttfb, transfer);
 
@@ -230,16 +266,21 @@ public sealed class FileAccessSession : IDisposable
             FileAccessLog.Logger.Information(
                 "[FileAccess] {FileName} provider {Provider}: {SegmentsOk} segments, {BytesMB:F1} MB, " +
                 "{ThroughputMbps:F2} Mbit/s avg, {AvgTtfbMs:F0}ms avg ttfb, " +
-                "{AttemptFailures} failed attempts, {MissingArticles} missing, {Timeouts} timeouts",
+                "{SuccessfulAttempts} ok ({AvgSuccessResponseMs:F0}ms avg), " +
+                "{AttemptFailures} failed, {MissingArticles} missing, {Timeouts} timeouts, " +
+                "{AvgResponseMs:F0}ms avg response",
                 _fileName,
                 snapshot.ProviderHost,
                 snapshot.SegmentsOk,
                 snapshot.Bytes / 1024.0 / 1024.0,
                 snapshot.ThroughputMbps,
                 snapshot.AvgTtfbMs,
+                snapshot.SuccessfulAttempts,
+                snapshot.AvgSuccessResponseMs,
                 snapshot.AttemptFailures,
                 snapshot.MissingArticles,
-                snapshot.Timeouts);
+                snapshot.Timeouts,
+                snapshot.AvgResponseMs);
         }
     }
 

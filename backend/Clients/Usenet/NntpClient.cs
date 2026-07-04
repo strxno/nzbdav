@@ -1,4 +1,5 @@
 using NzbWebDAV.Clients.Usenet.Models;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Exceptions;
 using NzbWebDAV.Extensions;
 using NzbWebDAV.Models.Nzb;
@@ -70,6 +71,29 @@ public abstract class NntpClient : INntpClient
     )
     {
         var message = $"{GetType().Name} does not support DecodedArticleAsync with exclusive connections.";
+        throw new NotSupportedException(message);
+    }
+
+    public virtual Task<UsenetProviderBodyResponse> DecodedBodyFromProviderAsync
+    (
+        SegmentId segmentId,
+        CancellationToken cancellationToken,
+        FileAccessSession? telemetrySession = null
+    )
+    {
+        var message = $"{GetType().Name} does not support DecodedBodyFromProviderAsync.";
+        throw new NotSupportedException(message);
+    }
+
+    public virtual Task<UsenetProviderBodyResponse> DecodedBodyFromProviderAsync
+    (
+        SegmentId segmentId,
+        UsenetExclusiveConnection exclusiveConnection,
+        CancellationToken cancellationToken,
+        FileAccessSession? telemetrySession = null
+    )
+    {
+        var message = $"{GetType().Name} does not support DecodedBodyFromProviderAsync with exclusive connections.";
         throw new NotSupportedException(message);
     }
 

@@ -42,14 +42,15 @@ public class UnbufferedMultiSegmentStream : FastReadOnlyNonSeekableStream
                 var segmentIndex = _baseSegmentIndex + _currentIndex;
                 var segmentId = _segmentIds.Span[_currentIndex++];
                 var stopwatch = Stopwatch.StartNew();
-                var body = await _usenetClient.DecodedBodyAsync(segmentId, cancellationToken);
+                var body = await _usenetClient.DecodedBodyFromProviderAsync(
+                    segmentId, cancellationToken, _fileAccessSession);
                 stopwatch.Stop();
                 _stream = FileAccessTelemetry.WrapSegmentStream(
-                    body.Stream,
+                    body.Response.Stream,
+                    body.ProviderHost,
                     segmentId,
                     segmentIndex,
                     stopwatch.Elapsed,
-                    cancellationToken,
                     _fileAccessSession);
             }
 

@@ -1,4 +1,5 @@
 ﻿using NzbWebDAV.Clients.Usenet.Models;
+using NzbWebDAV.Clients.Usenet.Telemetry;
 using NzbWebDAV.Models.Nzb;
 using NzbWebDAV.Streams;
 using UsenetSharp.Models;
@@ -41,6 +42,15 @@ public interface INntpClient : IDisposable
 
     Task<UsenetDecodedBodyResponse> DecodedBodyAsync(
         SegmentId segmentId, UsenetExclusiveConnection connection, CancellationToken cancellationToken);
+
+    Task<UsenetProviderBodyResponse> DecodedBodyFromProviderAsync(
+        SegmentId segmentId, CancellationToken cancellationToken, FileAccessSession? telemetrySession = null);
+
+    Task<UsenetProviderBodyResponse> DecodedBodyFromProviderAsync(
+        SegmentId segmentId,
+        UsenetExclusiveConnection connection,
+        CancellationToken cancellationToken,
+        FileAccessSession? telemetrySession = null);
 
     Task<UsenetDecodedArticleResponse> DecodedArticleAsync(
         SegmentId segmentId, UsenetExclusiveConnection connection, CancellationToken cancellationToken);

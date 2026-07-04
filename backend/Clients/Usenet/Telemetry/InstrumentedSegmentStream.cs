@@ -86,6 +86,8 @@ internal sealed class InstrumentedSegmentStream : Stream
         _completed = true;
         _transferStopwatch.Stop();
 
+        if (_bytesRead <= 0) return;
+
         _session?.RecordSegmentSuccess(
             _providerHost,
             _segmentId,

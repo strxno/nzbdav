@@ -96,16 +96,16 @@ public class MultiSegmentStream : FastReadOnlyNonSeekableStream
     {
         var stopwatch = Stopwatch.StartNew();
         var bodyResponse = await _usenetClient
-            .DecodedBodyAsync(segmentId, exclusiveConnection, cancellationToken)
+            .DecodedBodyFromProviderAsync(segmentId, exclusiveConnection, cancellationToken, _fileAccessSession)
             .ConfigureAwait(false);
         stopwatch.Stop();
 
         return FileAccessTelemetry.WrapSegmentStream(
-            bodyResponse.Stream,
+            bodyResponse.Response.Stream,
+            bodyResponse.ProviderHost,
             segmentId,
             segmentIndex,
             stopwatch.Elapsed,
-            cancellationToken,
             _fileAccessSession);
     }
 

@@ -68,6 +68,9 @@ public class ProviderCircuitBreaker
         {
             ClearExpiredCooldownLocked();
 
+            if (failure.Category == ProviderFailureCategory.MissingArticle)
+                return;
+
             // Parallel in-flight requests can all fail together; only trip once per cooldown.
             if (IsTrippedLocked()) return;
 

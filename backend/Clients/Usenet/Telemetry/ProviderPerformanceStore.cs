@@ -54,9 +54,14 @@ public sealed class ProviderPerformanceStore
         if (string.IsNullOrWhiteSpace(providerHost)) return double.MinValue;
 
         if (_speedTestMetrics.TryGetValue(providerHost, out var metrics))
-            return CalculateSpeedTestSortScore(metrics.MegabitsPerSecond, metrics.AverageTtfbMs);
+        {
+            var speedScore = CalculateSpeedTestSortScore(metrics.MegabitsPerSecond, metrics.AverageTtfbMs);
+            return _entries.TryGetValue(providerHost, out var entry)
+                ? entry.AdjustSpeedTestScore(speedScore)
+                : speedScore;
+        }
 
-        return _entries.TryGetValue(providerHost, out var entry) ? entry.GetSortScore() : 0;
+        return _entries.TryGetValue(providerHost, out var runtimeEntry) ? runtimeEntry.GetSortScore() : 0;
     }
 
     public IReadOnlyList<ProviderPerformanceRanking> GetRankings(IEnumerable<string> providerHosts)
@@ -131,6 +136,17 @@ public sealed class ProviderPerformanceStore
                     ? elapsedMs
                     : _emaResponseMs + ResponseEmaAlpha * (elapsedMs - _emaResponseMs);
             }
+        }
+
+        public double AdjustSpeedTestScore(double speedTestScore)
+        {
+            var missing = Volatile.Read(ref _missingArticles);
+            var failures = Volatile.Read(ref _failures);
+            var timeouts = Volatile.Read(ref _timeouts);
+
+            // Missing articles quickly deprioritize a fast provider that does not carry the content.
+            var missingFactor = 1.0 / (1 + missing * 3);
+            return speedTestScore * missingFactor - failures * 500 - timeouts * 1000;
         }
 
         public double GetSortScore()

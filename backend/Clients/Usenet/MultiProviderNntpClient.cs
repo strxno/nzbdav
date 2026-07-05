@@ -222,6 +222,7 @@ public class MultiProviderNntpClient(
                         segmentId,
                         stopwatch.Elapsed,
                         ProviderAttemptOutcome.MissingArticle);
+                    LogFailover(provider, orderedProviders, i, operation, segmentId, "missing article");
                     continue;
                 }
 
@@ -268,14 +269,22 @@ public class MultiProviderNntpClient(
                         failure,
                         stopwatch.Elapsed);
                 }
+                else if (outcome == ProviderAttemptOutcome.MissingArticle && !isLastProvider)
+                {
+                    LogFailover(provider, orderedProviders, i, operation, segmentId, failure.Summary);
+                }
                 else
                 {
                     Log.Debug(
-                        "Encountered error during NNTP Operation: `{Message}`. Trying another provider.",
+                        "Provider {Provider} failed {Operation} on {SegmentId}: {Summary}. Trying another provider.",
+                        provider.ProviderHost,
+                        operation,
+                        FormatSegmentId(segmentId),
                         failure.Summary);
                 }
 
                 lastException = ExceptionDispatchInfo.Capture(e);
+                continue;
             }
         }
 
@@ -289,16 +298,37 @@ public class MultiProviderNntpClient(
             .Where(x => x.ProviderType != ProviderType.Disabled)
             .ToList();
 
-        var healthy = enabled.Where(x => !x.IsTripped).ToList();
-        var candidates = healthy.Count > 0 ? healthy : enabled;
-
-        var ordered = candidates
-            .OrderBy(x => x.ProviderType)
+        var ordered = enabled
+            .OrderBy(x => x.IsTripped)
+            .ThenBy(x => x.ProviderType)
             .ThenByDescending(x => performanceStore.GetSortScore(x.ProviderHost))
             .ThenByDescending(x => x.AvailableConnections)
             .ToList();
 
         return RotateTiedPooledProviders(ordered);
+    }
+
+    private static void LogFailover
+    (
+        MultiConnectionNntpClient failedProvider,
+        List<MultiConnectionNntpClient> orderedProviders,
+        int failedIndex,
+        string operation,
+        string? segmentId,
+        string reason
+    )
+    {
+        var nextProvider = failedIndex + 1 < orderedProviders.Count
+            ? orderedProviders[failedIndex + 1].ProviderHost
+            : "none";
+        Log.Debug(
+            "Provider {Provider} {Reason} during {Operation} on {SegmentId}. Failover to {NextProvider} ({Remaining} remaining).",
+            failedProvider.ProviderHost,
+            reason,
+            operation,
+            FormatSegmentId(segmentId),
+            nextProvider,
+            orderedProviders.Count - failedIndex - 1);
     }
 
     private List<MultiConnectionNntpClient> RotateTiedPooledProviders(List<MultiConnectionNntpClient> ordered)

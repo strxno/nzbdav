@@ -162,16 +162,16 @@ public class MultiConnectionNntpClient(
             }
             catch (Exception e) when (e.IsCancellationException())
             {
-                LogException(() => connectionLock?.Dispose());
-                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved));
+                LogException(() => connectionLock?.Dispose(), "disposing connection lock");
+                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved), "notifying connection not retrieved");
                 throw;
             }
             catch (Exception e)
             {
                 lastFailure = e;
                 failureOperation = "CONNECT";
-                LogException(() => connectionLock?.Replace());
-                LogException(() => connectionLock?.Dispose());
+                LogException(() => connectionLock?.Replace(), "replacing connection lock");
+                LogException(() => connectionLock?.Dispose(), "disposing connection lock");
                 if (retryCount > 0)
                 {
                     Log.Debug(e, "Error getting connection-lock for provider {Provider}. Retrying with a new connection.", providerName);
@@ -180,7 +180,7 @@ public class MultiConnectionNntpClient(
                 }
 
                 Log.Warning(e, "Error getting connection-lock for provider {Provider}.", providerName);
-                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved));
+                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved), "notifying connection not retrieved");
                 break;
             }
 
@@ -191,22 +191,22 @@ public class MultiConnectionNntpClient(
             }
             catch (Exception e) when (e.IsCancellationException())
             {
-                LogException(() => connectionLock?.Dispose());
-                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved));
+                LogException(() => connectionLock?.Dispose(), "disposing connection lock");
+                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved), "notifying connection not retrieved");
                 throw;
             }
             catch (Exception e) when (e.TryGetCausingException(out UsenetArticleNotFoundException _))
             {
-                LogException(() => connectionLock?.Dispose());
-                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved));
+                LogException(() => connectionLock?.Dispose(), "disposing connection lock");
+                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved), "notifying connection not retrieved");
                 throw;
             }
             catch (Exception e)
             {
                 lastFailure = e;
                 failureOperation = name;
-                LogException(() => connectionLock?.Replace());
-                LogException(() => connectionLock?.Dispose());
+                LogException(() => connectionLock?.Replace(), "replacing connection lock");
+                LogException(() => connectionLock?.Dispose(), "disposing connection lock");
                 if (retryCount > 0)
                 {
                     Log.Debug(e, "Error executing nntp {Command} command for provider {Provider}. Retrying with a new connection.", name, providerName);
@@ -215,7 +215,7 @@ public class MultiConnectionNntpClient(
                 }
 
                 Log.Warning(e, "Error executing nntp {Command} command for provider {Provider}.", name, providerName);
-                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved));
+                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved), "notifying connection not retrieved");
                 break;
             }
 
@@ -224,14 +224,14 @@ public class MultiConnectionNntpClient(
             // stat, head, and date
             if (name is "STAT" or "HEAD" or "DATE")
             {
-                LogException(() => connectionLock?.Dispose());
+                LogException(() => connectionLock?.Dispose(), "disposing connection lock");
             }
             
             // body and article
             else if ((result?.Success ?? false) == false)
             {
-                LogException(() => connectionLock?.Dispose());
-                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved));
+                LogException(() => connectionLock?.Dispose(), "disposing connection lock");
+                LogException(() => onConnectionReadyAgain?.Invoke(ArticleBodyResult.NotRetrieved), "notifying connection not retrieved");
             }
 
             return result!;
@@ -240,8 +240,8 @@ public class MultiConnectionNntpClient(
             {
                 if (articleBodyResult != ArticleBodyResult.Retrieved) return;
 
-                LogException(() => connectionLock?.Dispose());
-                LogException(() => onConnectionReadyAgain?.Invoke(articleBodyResult));
+                LogException(() => connectionLock?.Dispose(), "disposing connection lock");
+                LogException(() => onConnectionReadyAgain?.Invoke(articleBodyResult), "notifying connection retrieved");
             }
         }
 
@@ -270,15 +270,17 @@ public class MultiConnectionNntpClient(
         throw new InvalidOperationException("Unreachable code ");
     }
 
-    private static void LogException(Action? action)
+    private static void LogException(Action? action, string context)
     {
+        if (action is null) return;
+
         try
         {
-            action?.Invoke();
+            action.Invoke();
         }
         catch (Exception e)
         {
-            Log.Warning(e, "Unhandled exception");
+            Log.Warning(e, "Unhandled exception while {Context}", context);
         }
     }
 

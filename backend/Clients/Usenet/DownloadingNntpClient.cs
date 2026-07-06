@@ -57,12 +57,13 @@ public class DownloadingNntpClient : WrappingNntpClient
     public override async Task<UsenetDecodedBodyResponse> DecodedBodyAsync(SegmentId segmentId,
         Action<ArticleBodyResult>? onConnectionReadyAgain, CancellationToken cancellationToken)
     {
+        var releaseDownloadSlot = CreateDownloadSlotReleaseCallback();
         await AcquireExclusiveConnectionAsync(onConnectionReadyAgain, cancellationToken).ConfigureAwait(false);
         return await base.DecodedBodyAsync(segmentId, OnConnectionReadyAgain, cancellationToken).ConfigureAwait(false);
 
         void OnConnectionReadyAgain(ArticleBodyResult articleBodyResult)
         {
-            _semaphore.Release();
+            releaseDownloadSlot(articleBodyResult);
             onConnectionReadyAgain?.Invoke(articleBodyResult);
         }
     }
@@ -70,13 +71,14 @@ public class DownloadingNntpClient : WrappingNntpClient
     public override async Task<UsenetDecodedArticleResponse> DecodedArticleAsync(SegmentId segmentId,
         Action<ArticleBodyResult>? onConnectionReadyAgain, CancellationToken cancellationToken)
     {
+        var releaseDownloadSlot = CreateDownloadSlotReleaseCallback();
         await AcquireExclusiveConnectionAsync(onConnectionReadyAgain, cancellationToken).ConfigureAwait(false);
         return await base.DecodedArticleAsync(segmentId, OnConnectionReadyAgain, cancellationToken)
             .ConfigureAwait(false);
 
         void OnConnectionReadyAgain(ArticleBodyResult articleBodyResult)
         {
-            _semaphore.Release();
+            releaseDownloadSlot(articleBodyResult);
             onConnectionReadyAgain?.Invoke(articleBodyResult);
         }
     }
@@ -109,7 +111,7 @@ public class DownloadingNntpClient : WrappingNntpClient
     )
     {
         await AcquireExclusiveConnectionAsync(cancellationToken).ConfigureAwait(false);
-        return new UsenetExclusiveConnection(_ => _semaphore.Release());
+        return new UsenetExclusiveConnection(CreateDownloadSlotReleaseCallback());
     }
 
     public override Task<UsenetDecodedBodyResponse> DecodedBodyAsync(SegmentId segmentId,
@@ -124,18 +126,19 @@ public class DownloadingNntpClient : WrappingNntpClient
         CancellationToken cancellationToken,
         FileAccessSession? telemetrySession = null)
     {
+        var releaseDownloadSlot = CreateDownloadSlotReleaseCallback();
         await AcquireExclusiveConnectionAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             return await InvokeProviderBodyAsync(
                 segmentId,
-                _ => _semaphore.Release(),
+                releaseDownloadSlot,
                 cancellationToken,
                 telemetrySession).ConfigureAwait(false);
         }
         catch
         {
-            _semaphore.Release();
+            releaseDownloadSlot(ArticleBodyResult.NotRetrieved);
             throw;
         }
     }
@@ -177,6 +180,16 @@ public class DownloadingNntpClient : WrappingNntpClient
     {
         var onConnectionReadyAgain = exclusiveConnection.OnConnectionReadyAgain;
         return base.DecodedArticleAsync(segmentId, onConnectionReadyAgain, cancellationToken);
+    }
+
+    private Action<ArticleBodyResult> CreateDownloadSlotReleaseCallback()
+    {
+        var released = 0;
+        return _ =>
+        {
+            if (Interlocked.CompareExchange(ref released, 1, 0) != 0) return;
+            _semaphore.Release();
+        };
     }
 
     public override void Dispose()

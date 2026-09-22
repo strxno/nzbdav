@@ -175,7 +175,7 @@ export function Actions({ slot, onRemove }: { slot: PresentationHistorySlot, onR
     // determine nzb download URL
     var nzbDownloadUrl = slot.nzb_blob_id
         ? `/api/download-nzb?nzbBlobId=${slot.nzb_blob_id}`
-        : `/api/download-nzbs?historyItemId=${slot.nzo_id}`;
+        : null;
 
     // determine whether explore action should be disabled
     var isFolderDisabled = !downloadFolder || !!slot.isRemoving || !!slot.fail_message;
@@ -211,7 +211,7 @@ export function Actions({ slot, onRemove }: { slot: PresentationHistorySlot, onR
                     isOpen={isMenuOpen}
                     onClose={() => setIsMenuOpen(false)}
                     options={[
-                        { option: <ExportNzb />, linkTo: nzbDownloadUrl },
+                        !!nzbDownloadUrl ? { option: <ExportNzb />, linkTo: nzbDownloadUrl } : undefined,
                         { option: <Remove />, onSelect: onRemoveSelected, variant: "danger" },
                     ]} />
             </div>

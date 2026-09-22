@@ -49,6 +49,11 @@ public class BlobStore
         await MemoryPackSerializer.SerializeAsync(compressionStream, blob);
     }
 
+    public static bool Exists(Guid id)
+    {
+        return File.Exists(GetBlobPath(id));
+    }
+
     public static Stream? ReadBlob(Guid id)
     {
         var blobPath = GetBlobPath(id);

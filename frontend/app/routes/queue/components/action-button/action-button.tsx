@@ -3,14 +3,15 @@ import type { ReactNode } from "react";
 import { classNames } from "~/utils/styling";
 
 export type ActionButtonProps = {
-    type: "delete" | "explore" | "menu",
+    type: "delete" | "explore" | "menu" | "export",
     text?: string,
+    title?: string,
     disabled?: boolean,
     selected?: boolean,
     onClick?: (e: React.MouseEvent) => void,
 }
 
-export function ActionButton({ type, text, disabled, selected, onClick }: ActionButtonProps): ReactNode {
+export function ActionButton({ type, text, title, disabled, selected, onClick }: ActionButtonProps): ReactNode {
     const classes = classNames([
         styles["action-button"],
         styles[type],
@@ -18,10 +19,11 @@ export function ActionButton({ type, text, disabled, selected, onClick }: Action
     ]);
 
     return (
-        <div className={disabled ? styles["disabled"] : undefined}>
+        <div className={disabled ? styles["disabled"] : undefined} title={title}>
             <div className={classes} onClick={onClick}>
                 {type === "delete" && <TrashIcon />}
                 {type === "explore" && <DirectoryIcon />}
+                {type === "export" && <ExportIcon />}
                 {type === "menu" && "⋯"}
                 {text && <div className={styles.text}>{text}</div>}
             </div>
@@ -41,6 +43,15 @@ function TrashIcon() {
     return (
         <svg className={styles["trash-icon"]} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 22 24">
             <path d="M16.313 4V2.144C16.313.96 15.353 0 14.169 0H7.831A2.14 2.14 0 0 0 5.69 2.189v-.002V4H0v2h.575c.196.023.372.099.515.214l-.002-.002c.119.157.203.346.239.552l.001.008l1.187 15.106c.094 1.84.094 2.118 2.25 2.118h12.462c2.16 0 2.16-.275 2.25-2.113l1.187-15.1c.036-.217.12-.409.242-.572l-.002.003a1 1 0 0 1 .508-.212h.58v-2h-5.687zM7 2.187c0-.6.487-.938 1.106-.938h5.734c.618 0 1.162.344 1.162.938V4h-8zM6.469 20l-.64-12h1.269l.656 12zm5.225 0H10.32V8h1.375zm3.85 0h-1.275l.656-12h1.269z" />
+        </svg>
+    )
+}
+
+function ExportIcon() {
+    return (
+        <svg className={styles["export-icon"]} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+            <path d="M3.5 6a.5.5 0 0 0-.5.5v8a.5.5 0 0 0 .5.5h9a.5.5 0 0 0 .5-.5v-8a.5.5 0 0 0-.5-.5h-2a.5.5 0 0 1 0-1h2A1.5 1.5 0 0 1 14 6.5v8a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 14.5v-8A1.5 1.5 0 0 1 3.5 5h2a.5.5 0 0 1 0 1h-2z" />
+            <path d="M7.646.146a.5.5 0 0 1 .708 0l3 3a.5.5 0 0 1-.708.708L8.5 1.707V10.5a.5.5 0 0 1-1 0V1.707L5.354 3.854a.5.5 0 1 1-.708-.708l3-3z" />
         </svg>
     )
 }

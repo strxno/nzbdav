@@ -104,6 +104,9 @@ export function QueueTable({
             <h3 onClick={onUploadClicked} style={{ cursor: 'pointer' }}>
                 Queue
             </h3>
+            <a href="/api/download-nzbs" title="Export all downloaded NZBs">
+                <ActionButton type="export" />
+            </a>
             {headerCheckboxState !== 'none' &&
                 <ActionButton type="delete" onClick={onRemove} />
             }

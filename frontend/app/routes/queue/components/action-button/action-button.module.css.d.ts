@@ -2,6 +2,7 @@ declare const styles: {
   readonly "action-button": string;
   readonly "trash-icon": string;
   readonly "directory-icon": string;
+  readonly "export-icon": string;
   readonly "text": string;
   readonly "disabled": string;
   readonly "selected": string;
@@ -9,6 +10,7 @@ declare const styles: {
   // action types
   readonly "delete": string;
   readonly "explore": string;
+  readonly "export": string;
   readonly "menu": string;
 };
 export = styles;

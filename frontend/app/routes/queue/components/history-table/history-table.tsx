@@ -63,6 +63,9 @@ export function HistoryTable({ historySlots, totalHistoryCount, onIsSelectedChan
     var sectionTitle = (
         <div className={styles.sectionTitle}>
             <h3>History</h3>
+            <a href="/api/download-nzbs" title="Export all downloaded NZBs">
+                <ActionButton type="export" />
+            </a>
             {headerCheckboxState !== 'none' &&
                 <ActionButton type="delete" onClick={onRemove} />
             }
@@ -172,7 +175,7 @@ export function Actions({ slot, onRemove }: { slot: PresentationHistorySlot, onR
     // determine nzb download URL
     var nzbDownloadUrl = slot.nzb_blob_id
         ? `/api/download-nzb?nzbBlobId=${slot.nzb_blob_id}`
-        : null;
+        : `/api/download-nzbs?historyItemId=${slot.nzo_id}`;
 
     // determine whether explore action should be disabled
     var isFolderDisabled = !downloadFolder || !!slot.isRemoving || !!slot.fail_message;
@@ -208,7 +211,7 @@ export function Actions({ slot, onRemove }: { slot: PresentationHistorySlot, onR
                     isOpen={isMenuOpen}
                     onClose={() => setIsMenuOpen(false)}
                     options={[
-                        !!nzbDownloadUrl ? { option: <ExportNzb />, linkTo: nzbDownloadUrl } : undefined,
+                        { option: <ExportNzb />, linkTo: nzbDownloadUrl },
                         { option: <Remove />, onSelect: onRemoveSelected, variant: "danger" },
                     ]} />
             </div>
